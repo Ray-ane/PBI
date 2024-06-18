@@ -3,7 +3,6 @@ using Microsoft.PowerBI.Api.Models;
 using Microsoft.Rest;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
 
 public class PbiEmbedService
@@ -45,6 +44,14 @@ public class PbiEmbedService
                 datasetId: datasetId
             );
             return await client.Reports.GenerateTokenInGroupAsync(new Guid(workspaceId), new Guid(reportId), embedTokenRequest);
+        }
+    }
+
+    public async Task<Report> GetReportAsync(string workspaceId, string reportId)
+    {
+        using (var client = GetPowerBiClient())
+        {
+            return await client.Reports.GetReportInGroupAsync(new Guid(workspaceId), new Guid(reportId));
         }
     }
 
