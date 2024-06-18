@@ -1,0 +1,52 @@
+using Microsoft.PowerBI.Api;
+using Microsoft.PowerBI.Api.Models;
+using Microsoft.Rest;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+public class PbiEmbedService
+{
+    private readonly string urlPowerBiServiceApiRoot = "https://api.powerbi.com/";
+
+    private PowerBIClient GetPowerBiClient()
+    {
+        var tokenCredentials = new TokenCredentials(AadService.GetAccessToken(), "Bearer");
+        return new PowerBIClient(new Uri(urlPowerBiServiceApiRoot), tokenCredentials);
+    }
+
+    public async Task<IList<Group>> GetWorkspacesAsync()
+    {
+        using (var client = GetPowerBiClient())
+        {
+            var workspaces = await client.Groups.GetGroupsAsync();
+            return workspaces.Value;
+        }
+    }
+
+    public async Task<IList<Report>> GetReportsAsync(string workspaceId)
+    {
+        using (var client = GetPowerBiClient())
+        {
+            var reports = await client.Reports.GetReportsInGroupAsync(new Guid(workspaceId));
+            return reports.Value;
+        }
+    }
+
+    public async Task<EmbedToken> GetEmbedTokenAsync(string workspaceId, string reportId)
+    {
+        using (var client = GetPowerBiClient())
+        {
+            var report = await client.Reports.GetReportInGroupAsync(new Guid(workspaceId), new Guid(reportId));
+            var datasetId = report.DatasetId;
+            var embedTokenRequest = new GenerateTokenRequest(
+                accessLevel: "View",
+                datasetId: datasetId
+            );
+            return await client.Reports.GenerateTokenInGroupAsync(new Guid(workspaceId), new Guid(reportId), embedTokenRequest);
+        }
+    }
+
+    // Existing methods here (GetEmbedParamsForSingleReport, etc.)
+}
