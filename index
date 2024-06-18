@@ -8,19 +8,29 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Power BI Embed</title>
-    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/powerbi-client/2.9.0/powerbi.min.js"></script>
     <style>
         body {
             display: flex;
-            background-color: #f8f9fa;
+            flex-direction: column;
+            margin: 0;
+        }
+        .header {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+        .content {
+            display: flex;
+            flex: 1;
         }
         .sidebar {
             width: 250px;
-            background-color: #ffffff;
+            background-color: #f4f4f4;
             padding: 20px;
             box-shadow: 2px 0 5px rgba(0,0,0,0.1);
             height: 100vh;
@@ -29,47 +39,61 @@
             flex: 1;
             padding: 20px;
         }
+        .sidebar label,
+        .sidebar select,
+        .sidebar button {
+            display: block;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        .sidebar button {
+            padding: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .sidebar button:hover {
+            background-color: #0056b3;
+        }
         #visual-container {
             width: 50%; /* Adjust the width as needed */
             height: 400px; /* Adjust the height as needed */
         }
-        .btn-primary {
-            background-color: #007bff;
-            border-color: #007bff;
-        }
-        .btn-primary:hover {
-            background-color: #0056b3;
-            border-color: #0056b3;
-        }
     </style>
 </head>
 <body>
-    <div class="sidebar">
-        <label for="workspaces">Select Workspace:</label>
-        <select id="workspaces" class="form-control mb-3"></select>
-
-        <label for="reports">Select Report:</label>
-        <select id="reports" class="form-control mb-3"></select>
-
-        <button id="embedReportButton" class="btn btn-primary mb-3">Embed Report</button>
-
-        <label for="pages">Select Page:</label>
-        <select id="pages" class="form-control mb-3"></select>
-
-        <button id="embedPageButton" class="btn btn-primary mb-3">Change Page</button>
-
-        <label for="visuals">Select Visual:</label>
-        <select id="visuals" class="form-control mb-3"></select>
-
-        <button id="embedVisualButton" class="btn btn-primary mb-3">Embed Visual</button>
-
-        <button id="exportPdfButton" class="btn btn-primary mb-3">Export to PDF</button>
+    <div class="header">
+        Power BI Embed Application
     </div>
+    <div class="content">
+        <div class="sidebar">
+            <label for="workspaces">Select Workspace:</label>
+            <select id="workspaces"></select>
 
-    <div class="main-content">
-        <div id="report-container" class="border mb-3" style="height: 500px; width: 100%;"></div>
-        <div id="visual-container" class="border" style="height: 400px; width: 50%;"></div>
-        <div class="error-container alert alert-danger mt-3" style="display: none;"></div>
+            <label for="reports">Select Report:</label>
+            <select id="reports"></select>
+
+            <button id="embedReportButton">Embed Report</button>
+
+            <label for="pages">Select Page:</label>
+            <select id="pages"></select>
+
+            <button id="embedPageButton">Change Page</button>
+
+            <label for="visuals">Select Visual:</label>
+            <select id="visuals"></select>
+
+            <button id="embedVisualButton">Embed Visual</button>
+
+            <button id="exportPdfButton">Export to PDF</button>
+        </div>
+
+        <div class="main-content">
+            <div id="report-container" style="height: 500px; width: 100%;"></div>
+            <div id="visual-container" style="height: 400px; width: 50%;"></div>
+            <div class="error-container" style="display: none;"></div>
+        </div>
     </div>
 
     <script>
