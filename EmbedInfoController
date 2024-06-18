@@ -1,13 +1,13 @@
+using System.Threading.Tasks;
+using AppOwnsData.Models;
+using AppOwnsData.Services;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using System;
+using System.Text.Json;
+
 namespace AppOwnsData.Controllers
 {
-    using AppOwnsData.Models;
-    using AppOwnsData.Services;
-    using Microsoft.AspNetCore.Mvc;
-    using Microsoft.Extensions.Options;
-    using System;
-    using System.Text.Json;
-    using System.Threading.Tasks;
-
     [Route("api/[controller]")]
     [ApiController]
     public class EmbedInfoController : Controller
