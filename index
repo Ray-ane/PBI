@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Power BI Embed</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/powerbi-client/2.9.0/powerbi.min.js"></script>
+  </head>
+  <body>
+    <div>
+      <label for="workspaces">Select Workspace:</label>
+      <select id="workspaces"></select>
+
+      <label for="reports">Select Report:</label>
+      <select id="reports"></select>
+
+      <button id="embedReportButton">Embed Report</button>
+    </div>
+
+    <div id="report-container" style="height: 500px; width: 100%"></div>
+
+    <div>
+      <label for="pages">Select Page:</label>
+      <select id="pages"></select>
+
+      <button id="embedPageButton">Change Page</button>
+    </div>
+
+    <div>
+      <label for="visuals">Select Visual:</label>
+      <select id="visuals"></select>
+
+      <button id="embedVisualButton">Embed Visual</button>
+    </div>
+
+    <div id="visual-container" style="height: 500px; width: 100%"></div>
+    <div class="error-container" style="display: none"></div>
+
+    <script>
+      $(document).ready(function () {
+        var reportContainer = $("#report-container").get(0);
+        var visualContainer = $("#visual-container").get(0);
+        var currentReport = null; // Variable to keep track of the current embedded report
+
+        // Fetch and populate workspaces
+        $.ajax({
+          type: "GET",
+          url: "/getworkspaces",
+          success: function (data) {
+            console.log("Workspaces fetched successfully");
+            var workspaceDropdown = $("#workspaces");
+            workspaceDropdown.empty();
+            workspaceDropdown.append(
+              $("<option>", {
+                value: "",
+                text: "Select Workspace",
+              })
+            );
+            $.each(data.value, function (i, workspace) {
+              workspaceDropdown.append(
+                $("<option>", {
+                  value: workspace.id,
+                  text: workspace.name,
+                })
+              );
+            });
+          },
+          error: function (err) {
+            console.error("Error fetching workspaces:", err);
+          },
+        });
+
+        // Fetch and populate reports based on selected workspace
+        $("#workspaces").change(function () {
+          var workspaceId = $(this).val();
+          console.log("Workspace selected:", workspaceId);
+          $.ajax({
+            type: "GET",
+            url: "/getreports",
+            data: { workspaceId: workspaceId },
+            success: function (data) {
+              console.log(
+                "Reports fetched successfully for workspace:",
+                workspaceId
+              );
+              var reportDropdown = $("#reports");
+              reportDropdown.empty();
+              reportDropdown.append(
+                $("<option>", {
+                  value: "",
+                  text: "Select Report",
+                })
+              );
+              $.each(data.value, function (i, report) {
+                reportDropdown.append(
+                  $("<option>", {
+                    value: report.id,
+                    text: report.name,
+                  })
+                );
+              });
+            },
+            error: function (err) {
+              console.error(
+                "Error fetching reports for workspace:",
+                workspaceId,
+                err
+              );
+            },
+          });
+        });
+
+        // Embed report on button click
+        $("#embedReportButton").click(function () {
+          var workspaceId = $("#workspaces").val();
+          var reportId = $("#reports").val();
+          console.log(
+            "Embed button clicked. Workspace ID:",
+            workspaceId,
+            "Report ID:",
+            reportId
+          );
+          if (reportId) {
+            $.ajax({
+              type: "GET",
+              url: "/getembedinfo",
+              data: { workspaceId: workspaceId, reportId: reportId },
+              dataType: "json",
+              success: function (data) {
+                console.log("Embed info fetched successfully:", data);
+                if (!data || !data.reportConfig || !data.reportConfig[0]) {
+                  console.error("Unexpected data structure:", data);
+                  alert("Failed to get embed information. Please try again.");
+                  return;
+                }
+
+                var embedData = $.parseJSON(JSON.stringify(data));
+                var models = window["powerbi-client"].models;
+                var reportLoadConfig = {
+                  type: "report",
+                  tokenType: models.TokenType.Embed,
+                  accessToken: embedData.accessToken,
+                  embedUrl: embedData.reportConfig[0].embedUrl,
+                  settings: {
+                    filterPaneEnabled: false,
+                    navContentPaneEnabled: false,
+                  },
+                };
+
+                // Check if there's a currently embedded report
+                if (currentReport) {
+                  console.log("Resetting current report");
+                  powerbi.reset(reportContainer);
+                  currentReport = null;
+                }
+
+                // Embed the new report
+                currentReport = powerbi.embed(
+                  reportContainer,
+                  reportLoadConfig
+                );
+
+                currentReport.on("loaded", function () {
+                  console.log("Report load successful");
+                  // Fetch pages and visuals from the report
+                  currentReport
+                    .getPages()
+                    .then(function (pages) {
+                      var pageDropdown = $("#pages");
+                      pageDropdown.empty();
+                      pageDropdown.append(
+                        $("<option>", {
+                          value: "",
+                          text: "Select Page",
+                        })
+                      );
+                      $.each(pages, function (i, page) {
+                        pageDropdown.append(
+                          $("<option>", {
+                            value: page.name,
+                            text: page.displayName || page.name,
+                          })
+                        );
+                      });
+                      // Fetch visuals from the active page of the report
+                      var activePage = pages.find((page) => page.isActive);
+                      return activePage.getVisuals();
+                    })
+                    .then(function (visuals) {
+                      var visualDropdown = $("#visuals");
+                      visualDropdown.empty();
+                      visualDropdown.append(
+                        $("<option>", {
+                          value: "",
+                          text: "Select Visual",
+                        })
+                      );
+                      $.each(visuals, function (i, visual) {
+                        visualDropdown.append(
+                          $("<option>", {
+                            value: visual.name,
+                            text: visual.title || visual.name,
+                          })
+                        );
+                      });
+                    })
+                    .catch(function (errors) {
+                      console.error("Error fetching visuals:", errors);
+                    });
+                });
+
+                currentReport.on("rendered", function () {
+                  console.log("Report render successful");
+                });
+
+                currentReport.on("error", function (event) {
+                  console.error("Error in report:", event.detail);
+                });
+              },
+              error: function (err) {
+                console.error("Error fetching embed info:", err);
+                var errorContainer = $(".error-container");
+                errorContainer.show();
+                var errMessageHtml =
+                  "<strong> Error Details: </strong> <br/>" + err.responseText;
+                errorContainer.html(errMessageHtml);
+              },
+            });
+          } else {
+            alert("Please select a report.");
+          }
+        });
+
+        // Change page on button click
+        $("#embedPageButton").click(function () {
+          var pageName = $("#pages").val();
+          console.log("Change page button clicked. Page Name:", pageName);
+          if (currentReport && pageName) {
+            currentReport
+              .setPage(pageName)
+              .then(function () {
+                console.log("Page changed successfully");
+                // Fetch visuals from the new active page
+                currentReport
+                  .getActivePage()
+                  .then(function (page) {
+                    return page.getVisuals();
+                  })
+                  .then(function (visuals) {
+                    var visualDropdown = $("#visuals");
+                    visualDropdown.empty();
+                    visualDropdown.append(
+                      $("<option>", {
+                        value: "",
+                        text: "Select Visual",
+                      })
+                    );
+                    $.each(visuals, function (i, visual) {
+                      visualDropdown.append(
+                        $("<option>", {
+                          value: visual.name,
+                          text: visual.title || visual.name,
+                        })
+                      );
+                    });
+                  })
+                  .catch(function (errors) {
+                    console.error("Error fetching visuals:", errors);
+                  });
+              })
+              .catch(function (error) {
+                console.error("Error changing page:", error);
+              });
+          } else {
+            alert("Please select a page.");
+          }
+        });
+
+        // Embed visual on button click
+        $("#embedVisualButton").click(function () {
+          var workspaceId = $("#workspaces").val();
+          var reportId = $("#reports").val();
+          var visualName = $("#visuals").val();
+          var pageName = $("#pages").val();
+          console.log(
+            "Embed visual button clicked. Visual Name:",
+            visualName,
+            "Page Name:",
+            pageName
+          );
+          if (visualName && pageName) {
+            $.ajax({
+              type: "GET",
+              url: "/getembedinfo",
+              data: { workspaceId: workspaceId, reportId: reportId },
+              dataType: "json",
+              success: function (data) {
+                console.log(
+                  "Embed info fetched successfully for visual:",
+                  data
+                );
+                if (!data || !data.reportConfig || !data.reportConfig[0]) {
+                  console.error("Unexpected data structure:", data);
+                  alert("Failed to get embed information. Please try again.");
+                  return;
+                }
+
+                var embedData = $.parseJSON(JSON.stringify(data));
+                var models = window["powerbi-client"].models;
+                var visualLoadConfig = {
+                  type: "visual",
+                  tokenType: models.TokenType.Embed,
+                  accessToken: embedData.accessToken,
+                  embedUrl: embedData.reportConfig[0].embedUrl,
+                  id: reportId,
+                  pageName: pageName,
+                  visualName: visualName,
+                  settings: {
+                    filterPaneEnabled: false,
+                    navContentPaneEnabled: false,
+                  },
+                };
+
+                // Embed the visual
+                var visual = powerbi.embed(visualContainer, visualLoadConfig);
+
+                visual.on("loaded", function () {
+                  console.log("Visual load successful");
+                });
+
+                visual.on("rendered", function () {
+                  console.log("Visual render successful");
+                });
+
+                visual.on("error", function (event) {
+                  console.error("Error in visual:", event.detail);
+                });
+              },
+              error: function (err) {
+                console.error("Error fetching embed info for visual:", err);
+                var errorContainer = $(".error-container");
+                errorContainer.show();
+                var errMessageHtml =
+                  "<strong> Error Details: </strong> <br/>" + err.responseText;
+                errorContainer.html(errMessageHtml);
+              },
+            });
+          } else {
+            alert("Please select a visual.");
+          }
+        });
+      });
+    </script>
+  </body>
+</html>
