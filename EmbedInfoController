@@ -1,74 +1,106 @@
-using Microsoft.AspNetCore.Mvc;
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
-
-[Route("api/[controller]")]
-[ApiController]
-public class EmbedInfoController : ControllerBase
+namespace AppOwnsData.Controllers
 {
-    private readonly PbiEmbedService _pbiEmbedService;
+    using AppOwnsData.Models;
+    using AppOwnsData.Services;
+    using Microsoft.AspNetCore.Mvc;
+    using Microsoft.Extensions.Options;
+    using System;
+    using System.Text.Json;
+    using System.Threading.Tasks;
 
-    public EmbedInfoController(PbiEmbedService pbiEmbedService)
+    [Route("api/[controller]")]
+    [ApiController]
+    public class EmbedInfoController : Controller
     {
-        _pbiEmbedService = pbiEmbedService;
-    }
+        private readonly PbiEmbedService pbiEmbedService;
+        private readonly IOptions<AzureAd> azureAd;
+        private readonly IOptions<PowerBI> powerBI;
 
-    [HttpGet("getworkspaces")]
-    public async Task<IActionResult> GetWorkspaces()
-    {
-        try
+        public EmbedInfoController(PbiEmbedService pbiEmbedService, IOptions<AzureAd> azureAd, IOptions<PowerBI> powerBI)
         {
-            var workspaces = await _pbiEmbedService.GetWorkspacesAsync();
-            return Ok(workspaces);
+            this.pbiEmbedService = pbiEmbedService;
+            this.azureAd = azureAd;
+            this.powerBI = powerBI;
         }
-        catch (Exception ex)
-        {
-            return StatusCode(500, ex.Message);
-        }
-    }
 
-    [HttpGet("getreports")]
-    public async Task<IActionResult> GetReports(string workspaceId)
-    {
-        try
+        /// <summary>
+        /// Returns Embed token, Embed URL, and Embed token expiry to the client
+        /// </summary>
+        /// <returns>JSON containing parameters for embedding</returns>
+        [HttpGet("getembedinfo")]
+        public async Task<string> GetEmbedInfo(string workspaceId, string reportId)
         {
-            var reports = await _pbiEmbedService.GetReportsAsync(workspaceId);
-            return Ok(reports);
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, ex.Message);
-        }
-    }
-
-    [HttpGet("getembedinfo")]
-    public async Task<IActionResult> GetEmbedInfo(string workspaceId, string reportId)
-    {
-        try
-        {
-            var embedToken = await _pbiEmbedService.GetEmbedTokenAsync(workspaceId, reportId);
-            var report = await _pbiEmbedService.GetReportInGroupAsync(workspaceId, reportId);
-            var embedInfo = new
+            try
             {
-                reportConfig = new[]
+                // Validate whether all the required configurations are provided in appsettings.json
+                string configValidationResult = ConfigValidatorService.ValidateConfig(azureAd, powerBI);
+                if (configValidationResult != null)
                 {
-                    new {
-                        reportId = report.Id,
-                        reportName = report.Name,
-                        embedUrl = report.EmbedUrl,
-                        datasetId = report.DatasetId
-                    }
-                },
-                accessToken = embedToken.Token,
-                tokenExpiry = embedToken.Expiration.ToString("O"),
-                tokenId = embedToken.TokenId
-            };
-            return Ok(embedInfo);
+                    HttpContext.Response.StatusCode = 400;
+                    return configValidationResult;
+                }
+
+                var embedToken = await pbiEmbedService.GetEmbedTokenAsync(workspaceId, reportId);
+                var report = await pbiEmbedService.GetReportAsync(workspaceId, reportId);
+                var embedInfo = new
+                {
+                    reportConfig = new[]
+                    {
+                        new {
+                            reportId = report.Id,
+                            reportName = report.Name,
+                            embedUrl = report.EmbedUrl,
+                            datasetId = report.DatasetId
+                        }
+                    },
+                    accessToken = embedToken.Token,
+                    tokenExpiry = embedToken.Expiration.ToString("O"),
+                    tokenId = embedToken.TokenId
+                };
+
+                return JsonSerializer.Serialize(embedInfo);
+            }
+            catch (Exception ex)
+            {
+                HttpContext.Response.StatusCode = 500;
+                return ex.Message + "\n\n" + ex.StackTrace;
+            }
         }
-        catch (Exception ex)
+
+        /// <summary>
+        /// Returns the list of workspaces
+        /// </summary>
+        /// <returns>JSON containing list of workspaces</returns>
+        [HttpGet("getworkspaces")]
+        public async Task<IActionResult> GetWorkspaces()
         {
-            return StatusCode(500, ex.Message);
+            try
+            {
+                var workspaces = await pbiEmbedService.GetWorkspacesAsync();
+                return Ok(workspaces);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Returns the list of reports in a workspace
+        /// </summary>
+        /// <returns>JSON containing list of reports</returns>
+        [HttpGet("getreports")]
+        public async Task<IActionResult> GetReports(string workspaceId)
+        {
+            try
+            {
+                var reports = await pbiEmbedService.GetReportsAsync(workspaceId);
+                return Ok(reports);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, ex.Message);
+            }
         }
     }
 }
