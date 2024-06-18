@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using System;
 using System.Text.Json;
+using System.Collections.Generic;
 
 namespace AppOwnsData.Controllers
 {
@@ -40,8 +41,10 @@ namespace AppOwnsData.Controllers
                     return configValidationResult;
                 }
 
-                var embedToken = await pbiEmbedService.GetEmbedTokenAsync(workspaceId, reportId);
                 var report = await pbiEmbedService.GetReportAsync(workspaceId, reportId);
+                var datasetIds = new List<Guid> { new Guid(report.DatasetId) };
+                var embedToken = pbiEmbedService.GetEmbedToken(new Guid(reportId), datasetIds, new Guid(workspaceId));
+
                 var embedInfo = new
                 {
                     reportConfig = new[]
