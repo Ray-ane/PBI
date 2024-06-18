@@ -1,0 +1,74 @@
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+
+[Route("api/[controller]")]
+[ApiController]
+public class EmbedInfoController : ControllerBase
+{
+    private readonly PbiEmbedService _pbiEmbedService;
+
+    public EmbedInfoController(PbiEmbedService pbiEmbedService)
+    {
+        _pbiEmbedService = pbiEmbedService;
+    }
+
+    [HttpGet("getworkspaces")]
+    public async Task<IActionResult> GetWorkspaces()
+    {
+        try
+        {
+            var workspaces = await _pbiEmbedService.GetWorkspacesAsync();
+            return Ok(workspaces);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, ex.Message);
+        }
+    }
+
+    [HttpGet("getreports")]
+    public async Task<IActionResult> GetReports(string workspaceId)
+    {
+        try
+        {
+            var reports = await _pbiEmbedService.GetReportsAsync(workspaceId);
+            return Ok(reports);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, ex.Message);
+        }
+    }
+
+    [HttpGet("getembedinfo")]
+    public async Task<IActionResult> GetEmbedInfo(string workspaceId, string reportId)
+    {
+        try
+        {
+            var embedToken = await _pbiEmbedService.GetEmbedTokenAsync(workspaceId, reportId);
+            var report = await _pbiEmbedService.GetReportInGroupAsync(workspaceId, reportId);
+            var embedInfo = new
+            {
+                reportConfig = new[]
+                {
+                    new {
+                        reportId = report.Id,
+                        reportName = report.Name,
+                        embedUrl = report.EmbedUrl,
+                        datasetId = report.DatasetId
+                    }
+                },
+                accessToken = embedToken.Token,
+                tokenExpiry = embedToken.Expiration.ToString("O"),
+                tokenId = embedToken.TokenId
+            };
+            return Ok(embedInfo);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, ex.Message);
+        }
+    }
+}
