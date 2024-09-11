@@ -37,3 +37,58 @@ $finalCsvContent[0] = $finalCsvContent[0] -replace ' ', '_'
 $finalCsvContent | Set-Content -Path $outputFile
 
 Write-Host "CSV files have been appended successfully and headers modified to $outputFile."
+
+
+
+
+
+
+
+
+
+
+
+
+# Define the folder path containing the CSV files
+$folderPath = "C:\path\to\your\csv\files"
+
+# Define the output file path for the appended CSV
+$outputFile = "C:\path\to\your\output\combined.csv"
+
+# Get all CSV files in the folder
+$csvFiles = Get-ChildItem -Path $folderPath -Filter *.csv
+
+# Initialize a flag to track whether the header has been written to the output file
+$headerWritten = $false
+
+# Loop through each CSV file and append it to the output file
+foreach ($file in $csvFiles) {
+    # Read the raw content of each CSV file
+    $csvLines = Get-Content $file.FullName
+    
+    # If the header hasn't been written, write it
+    if (-not $headerWritten) {
+        # Write the first file's content (including header) to the output file
+        $csvLines | Out-File -FilePath $outputFile -Encoding utf8
+        $headerWritten = $true
+    } else {
+        # Skip the header line for subsequent files and append the content
+        $csvLines | Select-Object -Skip 1 | Out-File -FilePath $outputFile -Encoding utf8 -Append
+    }
+}
+
+# Now modify the header in the output CSV
+# Read the content of the final combined CSV file
+$finalCsvContent = Get-Content $outputFile
+
+# Modify the first line (header) by replacing spaces with underscores
+$finalCsvContent[0] = $finalCsvContent[0] -replace ' ', '_'
+
+# Write the modified content back to the CSV file
+$finalCsvContent | Set-Content -Path $outputFile
+
+Write-Host "CSV files have been appended successfully and headers modified to $outputFile."
+
+
+
+
