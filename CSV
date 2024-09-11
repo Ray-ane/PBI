@@ -15,24 +15,24 @@ foreach ($file in $csvFiles) {
     # Import the CSV file
     $csvContent = Import-Csv -Path $file.FullName
     
-    # If the header hasn't been written to the output file, modify and write it
+    # If the header hasn't been written to the output file, write it along with the content
     if (-not $headerWritten) {
-        # Get the first row as the header
-        $header = $csvContent[0].PSObject.Properties.Name
-        
-        # Replace spaces with underscores in the header
-        $newHeader = $header -replace ' ', '_'
-        
-        # Update the header in the CSV content
-        $csvContent = $csvContent | Select-Object $newHeader
-        
-        # Export the updated content with the modified header
         $csvContent | Export-Csv -Path $outputFile -NoTypeInformation
         $headerWritten = $true
     } else {
-        # Append content without modifying the header
+        # If the header is already written, append the content without the header
         $csvContent | Export-Csv -Path $outputFile -NoTypeInformation -Append
     }
 }
 
-Write-Host "CSV files have been appended successfully to $outputFile with headers modified."
+# Now modify the header in the output CSV
+# Read the content of the final combined CSV file
+$finalCsvContent = Get-Content $outputFile
+
+# Modify the first line (header) by replacing spaces with underscores
+$finalCsvContent[0] = $finalCsvContent[0] -replace ' ', '_'
+
+# Write the modified content back to the CSV file
+$finalCsvContent | Set-Content -Path $outputFile
+
+Write-Host "CSV files have been appended and the headers modified successfully to $outputFile."
