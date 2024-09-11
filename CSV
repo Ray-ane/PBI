@@ -17,11 +17,12 @@ foreach ($file in $csvFiles) {
     
     # If the header hasn't been written to the output file, write it along with the content
     if (-not $headerWritten) {
-        $csvContent | Export-Csv -Path $outputFile -NoTypeInformation
+        # Use ConvertTo-Csv and Out-File to avoid extra double quotes
+        $csvContent | ConvertTo-Csv -NoTypeInformation | Out-File -FilePath $outputFile -Encoding utf8
         $headerWritten = $true
     } else {
-        # If the header is already written, append the content without the header
-        $csvContent | Export-Csv -Path $outputFile -NoTypeInformation -Append
+        # Append content without the header using ConvertTo-Csv and avoid extra quotes
+        $csvContent | ConvertTo-Csv -NoTypeInformation | Select-Object -Skip 1 | Out-File -FilePath $outputFile -Encoding utf8 -Append
     }
 }
 
@@ -35,4 +36,4 @@ $finalCsvContent[0] = $finalCsvContent[0] -replace ' ', '_'
 # Write the modified content back to the CSV file
 $finalCsvContent | Set-Content -Path $outputFile
 
-Write-Host "CSV files have been appended and the headers modified successfully to $outputFile."
+Write-Host "CSV files have been appended successfully and headers modified to $outputFile."
