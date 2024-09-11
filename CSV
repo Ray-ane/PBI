@@ -1,0 +1,28 @@
+# Define the folder path containing the CSV files
+$folderPath = "C:\path\to\your\csv\files"
+
+# Define the output file path for the appended CSV
+$outputFile = "C:\path\to\your\output\combined.csv"
+
+# Get all CSV files in the folder
+$csvFiles = Get-ChildItem -Path $folderPath -Filter *.csv
+
+# Initialize a flag to track whether the header has been written to the output file
+$headerWritten = $false
+
+# Loop through each CSV file and append it to the output file
+foreach ($file in $csvFiles) {
+    # Import the CSV file
+    $csvContent = Import-Csv -Path $file.FullName
+    
+    # If the header hasn't been written to the output file, write it along with the content
+    if (-not $headerWritten) {
+        $csvContent | Export-Csv -Path $outputFile -NoTypeInformation
+        $headerWritten = $true
+    } else {
+        # If the header is already written, append the content without the header
+        $csvContent | Export-Csv -Path $outputFile -NoTypeInformation -Append
+    }
+}
+
+Write-Host "CSV files have been appended successfully to $outputFile."
