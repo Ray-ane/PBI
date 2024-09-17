@@ -12,9 +12,14 @@ client_id = 'your-client-id'
 cert_file = 'path/to/yourcert.p12'       # Your .p12 certificate file
 cert_password = 'your-cert-password'     # None if not set
 
-group_id = 'your-group-id'               # Workspace (Group) ID
+workspace_id = 'your-workspace-id'       # Workspace (Group) ID
 report_name = 'Your Report Name'         # Name of the report to export
-output_file = 'report.pdf'               # Output PDF file path
+output_path = 'report.pdf'               # Output PDF file path
+save_locally = True                      # Set to False if you don't want to save locally
+
+# Effective identity (if needed for RLS)
+effective_identity_username = 'user@example.com'  # Replace with the effective username
+effective_identity_roles = ['Role1', 'Role2']     # Replace with roles defined in RLS
 
 # Define your proxy settings (if needed)
 proxies = {
@@ -72,114 +77,104 @@ if "access_token" in result:
         'Content-Type': 'application/json'
     }
 
-    # Function to get report ID by name
-    def get_report_id(access_token, group_id, report_name):
-        reports_url = f'https://api.powerbi.com/v1.0/myorg/groups/{group_id}/reports'
-        response = session.get(reports_url, headers=headers)
-        if response.status_code == 200:
-            reports_data = response.json()
-            for report in reports_data.get('value', []):
-                if report['name'] == report_name:
-                    return report['id']
-            print(f"Report with name '{report_name}' not found in workspace '{group_id}'")
-            return None
-        else:
-            print(f"Failed to get reports from workspace '{group_id}': {response.status_code}")
-            print(response.text)
-            return None
-
-    # Function to get dataset ID for the report
-    def get_dataset_id(access_token, group_id, report_id):
-        report_url = f'https://api.powerbi.com/v1.0/myorg/groups/{group_id}/reports/{report_id}'
-        response = session.get(report_url, headers=headers)
-        if response.status_code == 200:
-            report_data = response.json()
-            dataset_id = report_data.get('datasetId')
-            return dataset_id
-        else:
-            print(f"Failed to get report details: {response.status_code}")
-            print(response.text)
-            return None
-
-    # Get the report ID
-    report_id = get_report_id(access_token, group_id, report_name)
-    if not report_id:
-        exit(1)
-
-    # Get the dataset ID
-    dataset_id = get_dataset_id(access_token, group_id, report_id)
-    if not dataset_id:
-        exit(1)
-
-    # Define the effective identity
-    effective_identity = {
-        "username": "user@example.com",        # Replace with the effective username
-        "roles": ["Role1", "Role2"],           # Replace with roles defined in RLS
-        "datasets": [dataset_id]
-    }
-
-    # Update the export configuration with the effective identity
-    export_config = {
-        "format": "PDF",
-        "powerBIReportConfiguration": {
-            "identities": [effective_identity]
-        }
-    }
-
-    # Start the export job
-    export_url = f'https://api.powerbi.com/v1.0/myorg/groups/{group_id}/reports/{report_id}/ExportTo'
-
-    response = session.post(export_url, headers=headers, json=export_config)
-
-    if response.status_code == 202:
-        # Get the export ID from the Location header
-        location = response.headers.get('Location')
-        if location:
-            export_id = location.split('/')[-1]
-        else:
-            response_data = response.json()
-            export_id = response_data.get('id')
-
-        if not export_id:
-            print("Failed to get export ID")
-            print(response.text)
-            exit(1)
-
-        # Poll the export status
-        status_url = f'https://api.powerbi.com/v1.0/myorg/groups/{group_id}/reports/{report_id}/exports/{export_id}'
-        while True:
-            status_response = session.get(status_url, headers=headers)
-            if status_response.status_code == 200:
-                status_data = status_response.json()
-                status = status_data['status']
-                if status == 'Succeeded':
-                    # Download the exported file
-                    file_url = status_data['resourceLocation']
-                    file_response = session.get(file_url, headers=headers, stream=True)
-                    if file_response.status_code == 200:
-                        with open(output_file, 'wb') as f:
-                            for chunk in file_response.iter_content(chunk_size=8192):
-                                if chunk:
-                                    f.write(chunk)
-                        print(f"Report exported successfully to {output_file}")
-                    else:
-                        print(f"Failed to download the exported file: {file_response.status_code}")
-                        print(file_response.text)
-                    break
-                elif status in ('Running', 'NotStarted'):
-                    print(f"Export job status: {status}. Waiting for 5 seconds...")
-                    time.sleep(5)
-                else:
-                    print(f"Export job failed with status: {status}")
-                    print(status_data)
-                    break
+    # Use the custom session for API calls
+    def export_report_to_pdf(workspace_id, report_name, output_path, headers, save_locally):
+        # Function to get report ID by name
+        def get_report_id(workspace_id, report_name):
+            reports_url = f'https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/reports'
+            response = session.get(reports_url, headers=headers)
+            if response.status_code == 200:
+                reports_data = response.json()
+                for report in reports_data.get('value', []):
+                    if report['name'] == report_name:
+                        return report['id'], report['datasetId']
+                print(f"Report with name '{report_name}' not found in workspace '{workspace_id}'")
+                return None, None
             else:
-                print(f"Error checking export status: {status_response.status_code}")
-                print(status_response.text)
+                print(f"Failed to get reports from workspace '{workspace_id}': {response.status_code}")
+                print(response.text)
+                return None, None
+
+        # Get the report ID and dataset ID
+        report_id, dataset_id = get_report_id(workspace_id, report_name)
+        if not report_id or not dataset_id:
+            raise Exception("Report ID or Dataset ID not found")
+
+        # Prepare export request URL and body
+        export_url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/reports/{report_id}/ExportTo"
+
+        # Build the export configuration with effective identity
+        effective_identity = {
+            "username": effective_identity_username,
+            "roles": effective_identity_roles,
+            "datasets": [dataset_id]
+        }
+
+        export_body = {
+            "format": "PDF",
+            "powerBIReportConfiguration": {
+                "identities": [effective_identity]
+            }
+        }
+
+        # Invoke export API
+        export_response = session.post(export_url, headers=headers, json=export_body)
+        if not export_response.ok:
+            print(f"Failed export initiation response: {export_response.text}")
+            raise Exception(f"Error initiating export: {export_response.text}")
+
+        export_id = export_response.json().get('id')
+        print(f"Export initiated. Export ID: {export_id}")
+
+        # Poll for export status
+        status_url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/reports/{report_id}/exports/{export_id}"
+        start_time = time.time()
+        timeout = 1800  # 30 minutes
+        sleep_duration = 10  # seconds
+
+        while True:
+            time.sleep(sleep_duration)
+            status_response = session.get(status_url, headers=headers)
+            if not status_response.ok:
+                print(f"Failed status check response: {status_response.text}")
+                raise Exception(f"Error getting export status: {status_response.text}, Status code: {status_response.status_code}")
+
+            status = status_response.json()
+            export_status = status['status']
+            percent_complete = status.get('percentComplete', 0)
+            print(f"Export status: {export_status}, Percent complete: {percent_complete}%")
+
+            if export_status == "Succeeded":
+                file_url = status['resourceLocation']
+                print(f"Export succeeded. Download URL: {file_url}")
                 break
-    else:
-        print(f"Error starting export job: {response.status_code}")
-        print(response.text)
+            elif export_status == "Failed":
+                print("Export job failed.")
+                print("Error details:")
+                print(status.get('error'))
+                raise Exception("Export failed")
+
+            if time.time() - start_time > timeout:
+                raise Exception("Export process timed out")
+
+        # Download the exported report
+        download_response = session.get(file_url, headers=headers)
+        if download_response.status_code // 100 == 2:
+            if save_locally:
+                with open(output_path, 'wb') as file:
+                    file.write(download_response.content)
+                print(f"Report saved to {output_path}")
+            else:
+                print("Report downloaded but not saved locally as per configuration.")
+            return file_url, output_path
+        else:
+            raise Exception(f"Error downloading report: {download_response.text}")
+
+    # Call the function to export the report
+    try:
+        export_report_to_pdf(workspace_id, report_name, output_path, headers, save_locally)
+    except Exception as e:
+        print(f"An error occurred: {e}")
 else:
     print(f"Error acquiring token: {result.get('error')}")
     print(result.get('error_description'))
