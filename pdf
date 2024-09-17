@@ -8,19 +8,19 @@ from cryptography.hazmat.backends import default_backend
 # Replace these values with your own
 tenant_id = 'your-tenant-id'
 client_id = 'your-client-id'
-cert_file = 'path/to/yourcert.pfx'
-cert_password = 'your-cert-password'  # Use None if not set
+cert_file = 'path/to/yourcert.p12'       # Updated to .p12 extension
+cert_password = 'your-cert-password'     # Use None if not set
 
-group_id = 'your-group-id'            # The Workspace (Group) ID
-report_name = 'Your Report Name'      # The name of the report to export
-output_file = 'report.pdf'            # Output PDF file path
+group_id = 'your-group-id'               # The Workspace (Group) ID
+report_name = 'Your Report Name'         # The name of the report to export
+output_file = 'report.pdf'               # Output PDF file path
 
-# Load the certificate and private key from the PFX file
+# Load the certificate and private key from the P12 file
 with open(cert_file, 'rb') as f:
-    pfx_data = f.read()
+    p12_data = f.read()
 
 private_key, certificate, additional_certificates = pkcs12.load_key_and_certificates(
-    pfx_data,
+    p12_data,
     cert_password.encode() if cert_password else None,
     backend=default_backend()
 )
