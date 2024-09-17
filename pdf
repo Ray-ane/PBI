@@ -16,7 +16,7 @@ group_id = 'your-group-id'               # Workspace (Group) ID
 report_name = 'Your Report Name'         # Name of the report to export
 output_file = 'report.pdf'               # Output PDF file path
 
-# Define your proxy settings
+# Define your proxy settings (if needed)
 proxies = {
     'http': 'http://your-proxy-server:port',
     'https': 'http://your-proxy-server:port',
@@ -88,19 +88,46 @@ if "access_token" in result:
             print(response.text)
             return None
 
+    # Function to get dataset ID for the report
+    def get_dataset_id(access_token, group_id, report_id):
+        report_url = f'https://api.powerbi.com/v1.0/myorg/groups/{group_id}/reports/{report_id}'
+        response = session.get(report_url, headers=headers)
+        if response.status_code == 200:
+            report_data = response.json()
+            dataset_id = report_data.get('datasetId')
+            return dataset_id
+        else:
+            print(f"Failed to get report details: {response.status_code}")
+            print(response.text)
+            return None
+
     # Get the report ID
     report_id = get_report_id(access_token, group_id, report_name)
     if not report_id:
         exit(1)
 
+    # Get the dataset ID
+    dataset_id = get_dataset_id(access_token, group_id, report_id)
+    if not dataset_id:
+        exit(1)
+
+    # Define the effective identity
+    effective_identity = {
+        "username": "user@example.com",        # Replace with the effective username
+        "roles": ["Role1", "Role2"],           # Replace with roles defined in RLS
+        "datasets": [dataset_id]
+    }
+
+    # Update the export configuration with the effective identity
+    export_config = {
+        "format": "PDF",
+        "powerBIReportConfiguration": {
+            "identities": [effective_identity]
+        }
+    }
+
     # Start the export job
     export_url = f'https://api.powerbi.com/v1.0/myorg/groups/{group_id}/reports/{report_id}/ExportTo'
-
-    # Request body parameters
-    export_config = {
-        "format": "PDF"
-        # Add more configurations here if needed
-    }
 
     response = session.post(export_url, headers=headers, json=export_config)
 
