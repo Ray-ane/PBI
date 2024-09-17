@@ -1,20 +1,33 @@
 import msal
 import requests
 import time
-# Remove hashlib import
-# import hashlib
 from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes, serialization
+from msal.oauth2cli import DefaultHttpClient
 
 # Replace these values with your own
 tenant_id = 'your-tenant-id'
 client_id = 'your-client-id'
-cert_file = 'path/to/yourcert.p12'       # Updated to .p12 extension
-cert_password = 'your-cert-password'     # Use None if not set
+cert_file = 'path/to/yourcert.p12'       # Your .p12 certificate file
+cert_password = 'your-cert-password'     # None if not set
 
-group_id = 'your-group-id'               # The Workspace (Group) ID
-report_name = 'Your Report Name'         # The name of the report to export
+group_id = 'your-group-id'               # Workspace (Group) ID
+report_name = 'Your Report Name'         # Name of the report to export
 output_file = 'report.pdf'               # Output PDF file path
+
+# Define your proxy settings
+proxies = {
+    'http': 'http://your-proxy-server:port',
+    'https': 'http://your-proxy-server:port',
+}
+
+# Create a custom session and set the proxies
+session = requests.Session()
+session.proxies.update(proxies)
+
+# Create an MSAL HTTP client with the custom session
+http_client = DefaultHttpClient(session)
 
 # Load the certificate and private key from the P12 file
 with open(cert_file, 'rb') as f:
@@ -26,29 +39,25 @@ private_key, certificate, additional_certificates = pkcs12.load_key_and_certific
     backend=default_backend()
 )
 
-# Import the correct hash algorithm
-from cryptography.hazmat.primitives import hashes
-
 # Compute the thumbprint using the correct hash algorithm
 thumbprint = certificate.fingerprint(hashes.SHA1()).hex()
 
 # Serialize the private key to PEM format
-from cryptography.hazmat.primitives import serialization
-
 private_key_pem = private_key.private_bytes(
     encoding=serialization.Encoding.PEM,
     format=serialization.PrivateFormat.PKCS8,
     encryption_algorithm=serialization.NoEncryption()
 )
 
-# Initialize the MSAL confidential client application
+# Initialize the MSAL confidential client application with the custom http_client
 app = msal.ConfidentialClientApplication(
     client_id,
     authority=f"https://login.microsoftonline.com/{tenant_id}",
     client_credential={
         "private_key": private_key_pem.decode(),
         "thumbprint": thumbprint,
-    }
+    },
+    http_client=http_client
 )
 
 # Acquire a token
@@ -66,7 +75,7 @@ if "access_token" in result:
     # Function to get report ID by name
     def get_report_id(access_token, group_id, report_name):
         reports_url = f'https://api.powerbi.com/v1.0/myorg/groups/{group_id}/reports'
-        response = requests.get(reports_url, headers=headers)
+        response = session.get(reports_url, headers=headers)
         if response.status_code == 200:
             reports_data = response.json()
             for report in reports_data.get('value', []):
@@ -90,10 +99,10 @@ if "access_token" in result:
     # Request body parameters
     export_config = {
         "format": "PDF"
-        # You can add more configurations here if needed
+        # Add more configurations here if needed
     }
 
-    response = requests.post(export_url, headers=headers, json=export_config)
+    response = session.post(export_url, headers=headers, json=export_config)
 
     if response.status_code == 202:
         # Get the export ID from the Location header
@@ -112,14 +121,14 @@ if "access_token" in result:
         # Poll the export status
         status_url = f'https://api.powerbi.com/v1.0/myorg/groups/{group_id}/reports/{report_id}/exports/{export_id}'
         while True:
-            status_response = requests.get(status_url, headers=headers)
+            status_response = session.get(status_url, headers=headers)
             if status_response.status_code == 200:
                 status_data = status_response.json()
                 status = status_data['status']
                 if status == 'Succeeded':
                     # Download the exported file
                     file_url = status_data['resourceLocation']
-                    file_response = requests.get(file_url, headers=headers, stream=True)
+                    file_response = session.get(file_url, headers=headers, stream=True)
                     if file_response.status_code == 200:
                         with open(output_file, 'wb') as f:
                             for chunk in file_response.iter_content(chunk_size=8192):
