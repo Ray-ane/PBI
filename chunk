@@ -1,0 +1,20 @@
+import numpy as np
+
+# Your existing function that inserts a DataFrame into SQL Server
+def insert_data(df_chunk):
+    # Assuming this is your function that inserts the DataFrame
+    # into SQL Server
+    pass  # Your existing logic here
+
+# Wrapper function that chunks the large DataFrame and calls insert_data
+def insert_data_in_chunks(df, chunk_size=1000):
+    # Split the DataFrame into chunks of 'chunk_size'
+    chunks = np.array_split(df, range(chunk_size, len(df), chunk_size))
+
+    # Call your existing insert function for each chunk
+    for chunk in chunks:
+        insert_data(chunk)
+
+# Example usage
+# df is your large DataFrame
+insert_data_in_chunks(df, chunk_size=1000)  # Insert 1000 rows at a time
