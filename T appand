@@ -1,0 +1,16 @@
+SELECT DISTINCT
+    t.id,
+    t.isin1,
+    t.isin2,
+    c.context
+FROM 
+    your_table_name t
+CROSS APPLY
+(
+    VALUES
+        (t.context1),
+        (t.context2),
+        (t.context3)
+) c (context)
+WHERE
+    c.context IS NOT NULL;
