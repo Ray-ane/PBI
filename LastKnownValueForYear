@@ -1,0 +1,14 @@
+LastKnownValueForYear = 
+VAR MaxDateInYear = 
+    CALCULATE(
+        MAX('Table'[InputDate]),
+        FILTER(
+            'Table',
+            YEAR('Table'[InputDate]) = MAX('Table'[Year])
+        )
+    )
+RETURN
+    CALCULATE(
+        MAX('Table'[Value]),
+        'Table'[InputDate] = MaxDateInYear
+    )
