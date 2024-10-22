@@ -1,0 +1,27 @@
+import pandas as pd
+
+# Load the existing CSV into a DataFrame
+csv_file_path = 'your_csv_file.csv'
+existing_df = pd.read_csv(csv_file_path, parse_dates=['date'])
+
+# Load the new data from the model (assuming it's in a DataFrame called new_data_df)
+# Example: new_data_df = pd.DataFrame({ 'date': [..], 'value': [..] })
+# Ensure that the 'date' column is of datetime type
+new_data_df['date'] = pd.to_datetime(new_data_df['date'])
+
+# Find the maximum date in the existing CSV
+if not existing_df.empty:
+    max_existing_date = existing_df['date'].max()
+else:
+    max_existing_date = pd.Timestamp.min
+
+# Filter the new data to include only rows with dates after the max_existing_date
+new_rows = new_data_df[new_data_df['date'] > max_existing_date]
+
+# If there are new rows, append them to the CSV
+if not new_rows.empty:
+    # Append new rows to the CSV
+    new_rows.to_csv(csv_file_path, mode='a', header=False, index=False)
+    print(f'{len(new_rows)} new rows added.')
+else:
+    print('No new rows to add.')
