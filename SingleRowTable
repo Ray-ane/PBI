@@ -1,0 +1,12 @@
+SingleRowTable = 
+SELECTCOLUMNS(
+    ADDCOLUMNS(
+        ROW("Dummy", 1),  // Create a dummy row to apply measures
+        "Calculated Column1", [Measure1],
+        "Calculated Column2", [Measure2],
+        "Calculated Column3", [Measure3]
+    ),
+    "Calculated Column1", [Calculated Column1],
+    "Calculated Column2", [Calculated Column2],
+    "Calculated Column3", [Calculated Column3]
+)
