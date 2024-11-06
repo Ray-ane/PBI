@@ -1,0 +1,12 @@
+Most Recent Value = 
+CALCULATE(
+    MAX(Fact2[value]), 
+    Fact2[isin] = EARLIER(Fact1[isin]),
+    Fact2[date] <= EARLIER(Fact1[date]),
+    ALL(Fact2), // This removes any existing filters on Fact2
+    Fact2[date] = CALCULATE(
+        MAX(Fact2[date]),
+        Fact2[isin] = EARLIER(Fact1[isin]),
+        Fact2[date] <= EARLIER(Fact1[date])
+    )
+)
