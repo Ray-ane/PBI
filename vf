@@ -1,0 +1,71 @@
+import os
+import pandas as pd
+from datetime import datetime
+import pyodbc
+
+def get_max_date_from_db():
+    """
+    Retrieve the maximum date from the SQL Server database.
+    """
+    connection = pyodbc.connect('DRIVER={SQL Server};SERVER=your_server;DATABASE=your_database;UID=your_username;PWD=your_password')
+    cursor = connection.cursor()
+    
+    query = "SELECT MAX(YourDateColumn) FROM YourTable"
+    cursor.execute(query)
+    result = cursor.fetchone()
+    cursor.close()
+    connection.close()
+    
+    return result[0] if result else None
+
+def retrieve_and_append_csv_files(directory, db_date, date_format='%Y-%m-%d'):
+    """
+    Retrieve all CSV files in the directory with dates at the start of their filenames 
+    greater than db_date. Append these files into a single DataFrame.
+    
+    :param directory: Directory containing the CSV files.
+    :param db_date: Date retrieved from the database (datetime object).
+    :param date_format: Format of the date in filenames, default is '%Y-%m-%d'.
+    :return: A pandas DataFrame containing all the data from the appended files.
+    """
+    # Ensure db_date is a datetime object
+    if not isinstance(db_date, datetime):
+        raise ValueError("db_date must be a datetime object.")
+    
+    # Collect matching files
+    matching_files = []
+    
+    for filename in os.listdir(directory):
+        if filename.endswith('.csv'):
+            # Extract the date from the beginning of the filename
+            try:
+                file_date = datetime.strptime(filename.split('_')[0], date_format)
+                if file_date > db_date:
+                    matching_files.append(os.path.join(directory, filename))
+            except ValueError:
+                # Skip files with invalid date format
+                continue
+    
+    # Append all matching files into a single DataFrame
+    all_data = pd.DataFrame()
+    
+    for file in matching_files:
+        df = pd.read_csv(file)
+        all_data = pd.concat([all_data, df], ignore_index=True)
+    
+    return all_data
+
+# Example usage
+if __name__ == "__main__":
+    # Get the max date from the database
+    max_date = get_max_date_from_db()
+    
+    if max_date:
+        # Define the directory containing the CSV files
+        csv_directory = "/path/to/your/csv/files"
+        
+        # Retrieve and append CSV files
+        appended_data = retrieve_and_append_csv_files(csv_directory, max_date)
+        
+        # Output the final DataFrame
+        print(appended_data)
