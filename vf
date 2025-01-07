@@ -18,13 +18,14 @@ def get_max_date_from_db():
     
     return result[0] if result else None
 
-def retrieve_and_append_csv_files(directory, db_date, date_format='%Y-%m-%d'):
+def retrieve_and_append_csv_files(directory, db_date, file_suffix, date_format='%Y-%m-%d'):
     """
-    Retrieve all CSV files in the directory with dates at the start of their filenames 
-    greater than db_date. Append these files into a single DataFrame.
+    Retrieve all CSV files in the directory with dates at the start of their filenames
+    and ending with the specified suffix, greater than db_date. Append these files into a single DataFrame.
     
     :param directory: Directory containing the CSV files.
     :param db_date: Date retrieved from the database (datetime object).
+    :param file_suffix: Suffix that the file must end with (e.g., '_data.csv').
     :param date_format: Format of the date in filenames, default is '%Y-%m-%d'.
     :return: A pandas DataFrame containing all the data from the appended files.
     """
@@ -36,7 +37,7 @@ def retrieve_and_append_csv_files(directory, db_date, date_format='%Y-%m-%d'):
     matching_files = []
     
     for filename in os.listdir(directory):
-        if filename.endswith('.csv'):
+        if filename.endswith(file_suffix):
             # Extract the date from the beginning of the filename
             try:
                 file_date = datetime.strptime(filename.split('_')[0], date_format)
@@ -64,8 +65,11 @@ if __name__ == "__main__":
         # Define the directory containing the CSV files
         csv_directory = "/path/to/your/csv/files"
         
+        # Define the file suffix (e.g., '_data.csv')
+        file_suffix = "_data.csv"
+        
         # Retrieve and append CSV files
-        appended_data = retrieve_and_append_csv_files(csv_directory, max_date)
+        appended_data = retrieve_and_append_csv_files(csv_directory, max_date, file_suffix)
         
         # Output the final DataFrame
         print(appended_data)
