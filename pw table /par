@@ -1,0 +1,163 @@
+###############################################################################
+# Load the AMO and TOM libraries
+###############################################################################
+Add-Type -AssemblyName "Microsoft.AnalysisServices.Tabular"
+Add-Type -AssemblyName "Microsoft.AnalysisServices"
+
+###############################################################################
+# Define the SSAS server, database, and table names to refresh
+###############################################################################
+$serverName  = "YourSSASServerName"
+$databaseName = "YourDatabaseName"
+
+# You can specify a single table name as a string 
+# $tableNames = @("TableToRefresh")
+
+# Or you can specify multiple table names in an array
+$tableNames = @("TableA", "TableB", "TableC")
+
+###############################################################################
+# Connect to the SSAS server
+###############################################################################
+$server = New-Object Microsoft.AnalysisServices.Server
+$server.Connect($serverName)
+
+###############################################################################
+# Get the SSAS Tabular database
+###############################################################################
+$database = $server.Databases.FindByName($databaseName)
+
+if ($database -ne $null) {
+
+    try {
+        # Track if we find at least one matching table
+        $foundTable = $false
+
+        # Iterate through tables in the model
+        foreach ($table in $database.Model.Tables) {
+            if ($tableNames -contains $table.Name) {
+                $foundTable = $true
+                Write-Host "Requesting refresh for table '$($table.Name)'..."
+
+                # Request a full refresh for the entire table
+                # (This automatically includes all partitions in that table.)
+                $table.RequestRefresh([Microsoft.AnalysisServices.Tabular.RefreshType]::Full)
+            }
+        }
+
+        if ($foundTable) {
+            # Commit the refresh requests
+            $database.Model.SaveChanges()
+            Write-Host "Requested full refresh for specified tables successfully."
+        }
+        else {
+            Write-Host "No matching tables were found in the database."
+        }
+
+    } catch {
+        Write-Host "An error occurred while processing the table refresh: $_"
+    }
+
+} else {
+    Write-Host "Database '$databaseName' not found."
+}
+
+###############################################################################
+# Disconnect from the server
+###############################################################################
+$server.Disconnect()
+
+
+
+-------------------------
+
+
+
+###############################################################################
+# Load the AMO and TOM libraries
+###############################################################################
+Add-Type -AssemblyName "Microsoft.AnalysisServices.Tabular"
+Add-Type -AssemblyName "Microsoft.AnalysisServices"
+
+###############################################################################
+# Define connection variables
+###############################################################################
+$serverName   = "YourSSASServerName"
+$databaseName = "YourDatabaseName"
+
+###############################################################################
+# Define the tables and partition-name filter
+###############################################################################
+# List of table names in which you want to look for partitions
+$tableNames = @("TableA", "TableB", "TableC")
+
+# Partition name or pattern to match. 
+# Use wildcards (e.g., "*Partial*") for partial matches.
+$partitionNameFilter = "*Partial*"
+
+###############################################################################
+# Connect to the SSAS server
+###############################################################################
+$server = New-Object Microsoft.AnalysisServices.Server
+$server.Connect($serverName)
+
+###############################################################################
+# Retrieve the SSAS Tabular database
+###############################################################################
+$database = $server.Databases.FindByName($databaseName)
+
+if ($database -ne $null) {
+    try {
+        # Track if we find any matching partition in the specified tables
+        $foundPartition = $false
+
+        # Iterate through the tables in the model
+        foreach ($table in $database.Model.Tables) {
+
+            # Check if this table's name is in our target list
+            if ($tableNames -contains $table.Name) {
+                Write-Host "Checking table '$($table.Name)'..."
+
+                # Iterate through each partition in the table
+                foreach ($partition in $table.Partitions) {
+                    # Check if the partition name matches the specified pattern
+                    if ($partition.Name -like $partitionNameFilter) {
+                        $foundPartition = $true
+                        Write-Host "Requesting refresh for partition '$($partition.Name)' in table '$($table.Name)'..."
+
+                        # Request a Full Refresh for this partition
+                        $partition.RequestRefresh([Microsoft.AnalysisServices.Tabular.RefreshType]::Full)
+                    }
+                }
+            }
+        }
+
+        # If we found and requested a refresh for one or more partitions, save changes
+        if ($foundPartition) {
+            $database.Model.SaveChanges()
+            Write-Host "Partitions matching '$partitionNameFilter' in specified tables were processed successfully."
+        }
+        else {
+            Write-Host "No partitions matching '$partitionNameFilter' found in the specified tables."
+        }
+
+    } catch {
+        Write-Host "An error occurred while processing partitions: $_"
+    }
+}
+else {
+    Write-Host "Database '$databaseName' not found on server '$serverName'."
+}
+
+###############################################################################
+# Disconnect from the SSAS server
+###############################################################################
+$server.Disconnect()
+
+
+
+
+
+
+
+
