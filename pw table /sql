@@ -27,12 +27,12 @@ try {
     $dataTable = New-Object System.Data.DataTable
     $adapter.Fill($dataTable) | Out-Null
 
-    # Construct an array that contains a distinct list of table names
-    # Extract the "tables" column from each row, sort, and remove duplicates
-    $distinctTables = $dataTable | Select-Object -ExpandProperty tables | Sort-Object -Unique
+    # Construct a single array that contains a distinct list of table names.
+    # The '@()' ensures the result is a PowerShell array.
+    $distinctTables = @($dataTable | Select-Object -ExpandProperty tables | Sort-Object -Unique)
 
-    # Print the distinct table names
-    Write-Output "Distinct list of tables:"
+    # Output the distinct tables array
+    Write-Output "Distinct Tables Array:"
     $distinctTables
 }
 catch {
