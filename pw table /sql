@@ -4,8 +4,8 @@ $database = "YourDatabase"      # Name of your database
 $username = "YourSQLUser"       # SQL Server login name
 $password = "YourSQLPassword"   # SQL Server login password
 
-# Define the query you want to execute
-$query = "SELECT * FROM YourTable"
+# Define the query (adjust the table name as needed)
+$query = "SELECT [Schema], [refresh], [tables] FROM YourTableName"
 
 # Build the connection string for SQL Server authentication
 $connectionString = "Server=$server;Database=$database;User Id=$username;Password=$password;"
@@ -22,33 +22,18 @@ try {
     $command = $connection.CreateCommand()
     $command.CommandText = $query
 
-    # Option 1: Using DataAdapter to fill a DataTable and then print it
+    # Use a DataAdapter to fill a DataTable with the query results
     $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
     $dataTable = New-Object System.Data.DataTable
     $adapter.Fill($dataTable) | Out-Null
 
-    # Print the DataTable as a formatted table in the console
-    $dataTable | Format-Table -AutoSize
+    # Construct an array that contains a distinct list of table names
+    # Extract the "tables" column from each row, sort, and remove duplicates
+    $distinctTables = $dataTable | Select-Object -ExpandProperty tables | Sort-Object -Unique
 
-    # Option 2: Alternatively, using a DataReader and collecting results into objects
-    # Uncomment the following block if you prefer this approach.
-    <#
-    $reader = $command.ExecuteReader()
-    $rows = @()
-
-    while ($reader.Read()) {
-        # Create a new PSObject for each row
-        $rowObject = New-Object PSObject
-        for ($i = 0; $i -lt $reader.FieldCount; $i++) {
-            $columnName = $reader.GetName($i)
-            $columnValue = $reader[$i]
-            $rowObject | Add-Member -MemberType NoteProperty -Name $columnName -Value $columnValue
-        }
-        $rows += $rowObject
-    }
-    $reader.Close()
-    $rows | Format-Table -AutoSize
-    #>
+    # Print the distinct table names
+    Write-Output "Distinct list of tables:"
+    $distinctTables
 }
 catch {
     Write-Error "An error occurred: $_"
