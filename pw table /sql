@@ -1,0 +1,50 @@
+# Define connection parameters
+$server   = "Sal"               # The name or address of your SQL Server
+$database = "YourDatabase"      # The database you want to connect to
+$username = "YourSQLUser"       # Your SQL Server login name
+$password = "YourSQLPassword"   # Your SQL Server login password
+
+# The query you want to execute
+$query = "SELECT * FROM YourTable"
+
+# Build the connection string for SQL Server authentication
+$connectionString = "Server=$server;Database=$database;User Id=$username;Password=$password;"
+
+# Create a new SQL connection object
+$connection = New-Object System.Data.SqlClient.SqlConnection
+$connection.ConnectionString = $connectionString
+
+try {
+    # Open the connection
+    $connection.Open()
+    Write-Output "Connection opened successfully."
+
+    # Create a SQL command object and assign the query and connection
+    $command = $connection.CreateCommand()
+    $command.CommandText = $query
+
+    # Execute the command and obtain a reader for the results
+    $reader = $command.ExecuteReader()
+
+    # Loop through the results
+    while ($reader.Read()) {
+        # For example, output each field from the current record.
+        # You can customize the output as needed.
+        $row = ""
+        for ($i = 0; $i -lt $reader.FieldCount; $i++) {
+            $row += $reader.GetName($i) + ": " + $reader[$i] + "  "
+        }
+        Write-Output $row
+    }
+
+    # Close the data reader
+    $reader.Close()
+}
+catch {
+    Write-Error "An error occurred: $_"
+}
+finally {
+    # Always close the connection
+    $connection.Close()
+    Write-Output "Connection closed."
+}
