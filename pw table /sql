@@ -1,59 +1,28 @@
-# Define connection parameters
-$server   = "Sal"               # SQL Server name or address
-$database = "YourDatabase"      # Name of your database
-$username = "YourSQLUser"       # SQL Server login name
-$password = "YourSQLPassword"   # SQL Server login password
+Environment,Server,Database,Username,Password
+DEV,SalDev,YourDevDatabase,YourDevSQLUser,YourDevSQLPassword
+PROD,SalProd,YourProdDatabase,YourProdSQLUser,YourProdSQLPassword
 
-# Define the query.
-# This query retrieves only the rows where refresh=1.
-$query = "SELECT [Schema], [refresh], [tables] FROM YourTableName WHERE [refresh] = 1"
 
-# Build the connection string for SQL Server authentication
-$connectionString = "Server=$server;Database=$database;User Id=$username;Password=$password;"
+# Set the target environment. Change this value to "DEV" or "PROD" as needed.
+$targetEnv = "DEV"
 
-# Create a new SQL connection object
-$connection = New-Object System.Data.SqlClient.SqlConnection($connectionString)
+# Define the path to the CSV file containing connection parameters.
+$csvPath = "C:\Path\To\connectionParameters.csv"
 
-try {
-    # Open the connection
-    $connection.Open()
-    Write-Output "Connection opened successfully."
+# Import the CSV file.
+$connectionParams = Import-Csv -Path $csvPath
 
-    # Create a SQL command object with the query
-    $command = $connection.CreateCommand()
-    $command.CommandText = $query
+# Retrieve connection parameters for the specified environment.
+$envParams = $connectionParams | Where-Object { $_.Environment -eq $targetEnv }
 
-    # Use a DataAdapter to fill a DataTable with the query results
-    $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
-    $dataTable = New-Object System.Data.DataTable
-    $adapter.Fill($dataTable) | Out-Null
-
-    # Initialize an empty array to collect table names from all rows
-    $allTables = @()
-
-    # Process each row in the DataTable.
-    # Each row's 'tables' column contains a comma-separated list of table names.
-    foreach ($row in $dataTable.Rows) {
-        if ($row.tables -and $row.tables.Trim() -ne "") {
-            # Split the 'tables' string on commas, trim each table name,
-            # and add them to the $allTables array.
-            $tablesInRow = $row.tables.Split(',') | ForEach-Object { $_.Trim() }
-            $allTables += $tablesInRow
-        }
-    }
-
-    # Produce a distinct list of table names and store it in a single array.
-    $distinctTables = @($allTables | Sort-Object -Unique)
-
-    # Output the final distinct tables array
-    Write-Output "Distinct Tables Array:"
-    $distinctTables
+if (-not $envParams) {
+    Write-Error "No connection parameters found for environment: $targetEnv"
+    exit
 }
-catch {
-    Write-Error "An error occurred: $_"
-}
-finally {
-    # Always close the connection
-    $connection.Close()
-    Write-Output "Connection closed."
-}
+
+# Assign the connection parameters.
+$server   = $envParams.Server
+$database = $envParams.Database
+$username = $envParams.Username
+$password = $envParams.Password
+
