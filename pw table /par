@@ -158,6 +158,120 @@ $server.Disconnect()
 
 
 
+---------------------------------
+
+
+
+
+###############################################################################
+# Load the required AMO/TOM and ADOMD libraries
+###############################################################################
+Add-Type -AssemblyName "Microsoft.AnalysisServices.Tabular"
+Add-Type -AssemblyName "Microsoft.AnalysisServices"
+Add-Type -AssemblyName "Microsoft.AnalysisServices.AdomdClient"
+
+###############################################################################
+# Define the SSAS server, database, and table names to refresh
+###############################################################################
+$serverName  = "YourSSASServerName"
+$databaseName = "YourDatabaseName"
+
+# You can specify a single table name as a string 
+# $tableNames = @("TableToRefresh")
+
+# Or specify multiple table names in an array
+$tableNames = @("TableA", "TableB", "TableC")
+
+###############################################################################
+# Query SSAS for currently processing objects (tables/partitions)
+###############################################################################
+# Build an ADOMD connection string
+$connectionString = "Data Source=$serverName;"
+
+# Open ADOMD connection
+$adomdConnection = New-Object Microsoft.AnalysisServices.AdomdClient.AdomdConnection($connectionString)
+$adomdConnection.Open()
+
+# Query the DMV for processing operations.
+# Here we filter commands that start with 'Process' (like ProcessFull, ProcessAdd, etc.).
+$query = "SELECT [OBJECT_NAME], [COMMAND] FROM \$SYSTEM.DISCOVER_OBJECT_ACTIVITY WHERE [COMMAND] LIKE 'Process%'"
+$command = $adomdConnection.CreateCommand()
+$command.CommandText = $query
+
+# Execute the query and store the names of objects currently processing in a hash table
+$processingObjects = @{}
+
+try {
+    $reader = $command.ExecuteReader()
+    while ($reader.Read()) {
+        $objectName = $reader["OBJECT_NAME"]
+        $commandText = $reader["COMMAND"]
+        if (-not $processingObjects.ContainsKey($objectName)) {
+            $processingObjects[$objectName] = $commandText
+        }
+    }
+    $reader.Close()
+} catch {
+    Write-Host "Error querying SSAS DMV: $_"
+}
+
+$adomdConnection.Close()
+
+###############################################################################
+# Connect to the SSAS server via AMO/TOM
+###############################################################################
+$server = New-Object Microsoft.AnalysisServices.Server
+$server.Connect($serverName)
+
+###############################################################################
+# Get the SSAS Tabular database
+###############################################################################
+$database = $server.Databases.FindByName($databaseName)
+
+if ($database -ne $null) {
+
+    try {
+        # Track if we find at least one matching table
+        $foundTable = $false
+
+        # Iterate through tables in the model
+        foreach ($table in $database.Model.Tables) {
+            if ($tableNames -contains $table.Name) {
+                $foundTable = $true
+
+                # Check if the table is currently processing (according to the DMV)
+                if ($processingObjects.ContainsKey($table.Name)) {
+                    Write-Host "Skipping refresh for table '$($table.Name)' because it is currently processing ($($processingObjects[$table.Name]))."
+                }
+                else {
+                    Write-Host "Requesting refresh for table '$($table.Name)'..."
+                    # Request a full refresh for the table (all partitions will be refreshed)
+                    $table.RequestRefresh([Microsoft.AnalysisServices.Tabular.RefreshType]::Full)
+                }
+            }
+        }
+
+        if ($foundTable) {
+            # Commit the refresh requests that were made
+            $database.Model.SaveChanges()
+            Write-Host "Refresh requests for specified tables have been submitted (if they were not already in process)."
+        }
+        else {
+            Write-Host "No matching tables were found in the database."
+        }
+
+    } catch {
+        Write-Host "An error occurred while processing the table refresh: $_"
+    }
+
+} else {
+    Write-Host "Database '$databaseName' not found."
+}
+
+###############################################################################
+# Disconnect from the server
+###############################################################################
+$server.Disconnect()
 
 
 
