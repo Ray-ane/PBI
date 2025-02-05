@@ -1,0 +1,47 @@
+import subprocess
+
+def run_powershell_script(script_path):
+    """
+    Executes a PowerShell script from Python.
+
+    Parameters:
+        script_path (str): The full path to the PowerShell script (.ps1) to execute.
+
+    Returns:
+        str: The standard output from the script if executed successfully.
+        None: If an error occurs during script execution.
+    """
+    # Construct the command to run PowerShell with the specified script.
+    # The '-ExecutionPolicy Bypass' flag is used to bypass the default execution policy.
+    command = [
+        "powershell.exe",
+        "-ExecutionPolicy", "Bypass",
+        "-File", script_path
+    ]
+
+    try:
+        # Run the command and capture the output.
+        result = subprocess.run(
+            command,
+            capture_output=True,  # Capture stdout and stderr.
+            text=True,            # Return output as a string.
+            check=True            # Raise CalledProcessError for non-zero exit codes.
+        )
+        return result.stdout
+    except subprocess.CalledProcessError as e:
+        # Print error details if the script fails.
+        print("An error occurred while executing the PowerShell script:")
+        print(e.stderr)
+        return None
+
+# Example usage:
+if __name__ == "__main__":
+    # Replace this with the full path to your PowerShell script.
+    ps_script_path = r"C:\Path\To\Your\script.ps1"
+    
+    output = run_powershell_script(ps_script_path)
+    if output is not None:
+        print("Script executed successfully. Output:")
+        print(output)
+    else:
+        print("Script execution failed.")
