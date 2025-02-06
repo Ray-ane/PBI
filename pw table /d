@@ -1,0 +1,11 @@
+RollingAvgRVError60 =
+CALCULATE(
+    AVERAGE(FactValue[value1]),
+    DATESINPERIOD(
+        DimCalendar[Date],
+        LASTDATE(DimCalendar[Date]),
+        -60,
+        DAY
+    ),
+    DimIndicator[name] = "RV error"
+)
