@@ -1,0 +1,118 @@
+"use strict";
+
+import "core-js/stable";
+import "./../style/visual.less";
+
+import * as d3 from "d3";
+import powerbiVisualsApi from "powerbi-visuals-api";
+import IVisual = powerbiVisualsApi.extensibility.visual.IVisual;
+import VisualConstructorOptions = powerbiVisualsApi.extensibility.visual.VisualConstructorOptions;
+import VisualUpdateOptions = powerbiVisualsApi.extensibility.visual.VisualUpdateOptions;
+import DataView = powerbiVisualsApi.DataView;
+
+export class Visual implements IVisual {
+    private target: HTMLElement;
+    private container: HTMLElement;
+    private rawData: number[] = [];
+
+    constructor(options: VisualConstructorOptions) {
+        this.target = options.element;
+
+        // Create a container element for the visual
+        this.container = document.createElement("div");
+        this.container.className = "customVisualContainer";
+
+        // Create the HTML for user inputs and the chart area
+        this.container.innerHTML = `
+            <div class="inputSection" style="margin-bottom: 10px;">
+                <input id="multiplier" type="number" placeholder="Multiplier" value="1" style="margin-right:5px;"/>
+                <input id="offset" type="number" placeholder="Offset" value="0" style="margin-right:5px;"/>
+                <button id="calculateButton">Calculate</button>
+            </div>
+            <div id="chartContainer"></div>
+        `;
+        // Append the container to the main element
+        this.target.appendChild(this.container);
+
+        // Set up the event listener for the Calculate button
+        const button = this.container.querySelector("#calculateButton");
+        button.addEventListener("click", () => this.calculateAndRender());
+    }
+
+    public update(options: VisualUpdateOptions) {
+        // Ensure we have a valid data view
+        if (!options.dataViews || !options.dataViews[0]) {
+            return;
+        }
+        const dataView: DataView = options.dataViews[0];
+
+        // Read the first categorical column from the data view
+        if (dataView.categorical &&
+            dataView.categorical.categories &&
+            dataView.categorical.categories.length > 0) {
+            
+            const categoryValues = dataView.categorical.categories[0].values;
+            // Convert values to numbers (if needed)
+            this.rawData = categoryValues.map(val => +val);
+        } else {
+            this.rawData = [];
+        }
+
+        // Render the chart using the current input values
+        this.calculateAndRender();
+    }
+
+    private calculateAndRender(): void {
+        // Retrieve the user-supplied inputs
+        const multiplierInput = this.container.querySelector("#multiplier") as HTMLInputElement;
+        const offsetInput = this.container.querySelector("#offset") as HTMLInputElement;
+
+        let multiplier = parseInt(multiplierInput.value, 10);
+        let offset = parseInt(offsetInput.value, 10);
+        if (isNaN(multiplier)) { multiplier = 1; }
+        if (isNaN(offset)) { offset = 0; }
+
+        // Process each value from rawData with the formula: (value * multiplier) + offset
+        const processedData = this.rawData.map(value => (value * multiplier) + offset);
+
+        // Render the bar chart using D3.js
+        this.renderChart(processedData);
+    }
+
+    private renderChart(data: number[]): void {
+        // Select the chart container (and clear any previous content)
+        const chartContainer = d3.select(this.container).select("#chartContainer");
+        chartContainer.selectAll("*").remove();
+
+        // Define dimensions for the SVG element
+        const width = 400;
+        const height = 200;
+        const svg = chartContainer.append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        // Create an x-scale based on the number of data points
+        const xScale = d3.scaleBand()
+            .domain(data.map((d, i) => i.toString()))
+            .range([0, width])
+            .padding(0.1);
+
+        // Create a y-scale based on the maximum value in the data
+        const yMax = d3.max(data) || 0;
+        const yScale = d3.scaleLinear()
+            .domain([0, yMax])
+            .range([height, 0]);
+
+        // Draw the bars of the chart
+        svg.selectAll(".bar")
+            .data(data)
+            .enter()
+            .append("rect")
+            .attr("class", "bar")
+            .attr("x", (d, i) => xScale(i.toString())!)
+            .attr("y", d => yScale(d))
+            .attr("width", xScale.bandwidth())
+            .attr("height", d => height - yScale(d))
+            .attr("fill", "steelblue");
+    }
+}
