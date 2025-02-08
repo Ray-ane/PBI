@@ -18,24 +18,28 @@ export class Visual implements IVisual {
         this.container = document.createElement("div");
         this.container.className = "gbmVisualContainer";
 
-        // Insert HTML for the slider inputs and chart container.
-        // (The simulate button is kept optionally if you wish to re-run the simulation manually.)
+        // Create a flex container with two panels:
+        // Left panel for inputs and right panel for the chart.
         this.container.innerHTML = `
-            <div class="inputSection" style="margin-bottom: 10px;">
-                <div style="margin-bottom:5px;">
-                    <label for="muRange">Mu (drift): </label>
-                    <input id="muRange" type="range" min="-0.2" max="0.2" step="0.01" value="0.05" />
-                    <span id="muValue">0.05</span>
+            <div class="layout" style="display: flex; height: 100%;">
+                <div class="leftPanel" style="min-width: 150px; padding: 10px; border-right: 1px solid #ccc;">
+                    <div class="inputSection">
+                        <div style="margin-bottom:5px;">
+                            <label for="muRange">Mu (drift): </label>
+                            <input id="muRange" type="range" min="-0.2" max="0.2" step="0.01" value="0.05" />
+                            <span id="muValue">0.05</span>
+                        </div>
+                        <div style="margin-bottom:5px;">
+                            <label for="sigmaRange">Sigma (volatility): </label>
+                            <input id="sigmaRange" type="range" min="0" max="0.5" step="0.01" value="0.2" />
+                            <span id="sigmaValue">0.2</span>
+                        </div>
+                    </div>
                 </div>
-                <div style="margin-bottom:5px;">
-                    <label for="sigmaRange">Sigma (volatility): </label>
-                    <input id="sigmaRange" type="range" min="0" max="0.5" step="0.01" value="0.2" />
-                    <span id="sigmaValue">0.2</span>
+                <div class="rightPanel" style="flex-grow: 1; padding: 10px;">
+                    <div id="chartContainer"></div>
                 </div>
-                <!-- Optional: A button if you want to manually re-run the simulation -->
-                <button id="simulateButton">Simulate</button>
             </div>
-            <div id="chartContainer"></div>
         `;
         this.target.appendChild(this.container);
 
@@ -45,7 +49,7 @@ export class Visual implements IVisual {
         const muDisplay = this.container.querySelector("#muValue") as HTMLSpanElement;
         const sigmaDisplay = this.container.querySelector("#sigmaValue") as HTMLSpanElement;
 
-        // Update the displayed values and re-run the simulation immediately on slider changes.
+        // Update displayed values and trigger the simulation immediately on slider input.
         muSlider.addEventListener("input", () => {
             muDisplay.innerText = muSlider.value;
             this.simulateAndRender();
@@ -54,29 +58,25 @@ export class Visual implements IVisual {
             sigmaDisplay.innerText = sigmaSlider.value;
             this.simulateAndRender();
         });
-
-        // Optional: Also update simulation on clicking the "Simulate" button.
-        const simulateButton = this.container.querySelector("#simulateButton");
-        simulateButton.addEventListener("click", () => this.simulateAndRender());
     }
 
-    // The update method is called when the visual is refreshed.
+    // Called when the visual is refreshed.
     public update(options: VisualUpdateOptions) {
         this.simulateAndRender();
     }
 
     private simulateAndRender(): void {
-        // Retrieve current values from the sliders.
+        // Retrieve current parameter values from the sliders.
         const muSlider = this.container.querySelector("#muRange") as HTMLInputElement;
         const sigmaSlider = this.container.querySelector("#sigmaRange") as HTMLInputElement;
 
         const mu = parseFloat(muSlider.value);
         const sigma = parseFloat(sigmaSlider.value);
 
-        // Simulation parameters:
+        // Simulation parameters.
         const S0 = 100;      // Starting value.
         const steps = 200;   // Number of time steps.
-        const dt = 1 / steps; // Time increment per step.
+        const dt = 1 / steps; // Time increment.
 
         // Generate a new GBM simulation path.
         const path = this.simulateGBM(mu, sigma, S0, steps, dt);
@@ -85,7 +85,7 @@ export class Visual implements IVisual {
     }
 
     /**
-     * Simulate a Geometric Brownian Motion path.
+     * Simulate a Geometric Brownian Motion (GBM) path.
      * @param mu - Drift parameter.
      * @param sigma - Volatility parameter.
      * @param S0 - Initial value.
@@ -112,7 +112,7 @@ export class Visual implements IVisual {
      */
     private randomNormal(): number {
         let u = 0, v = 0;
-        while (u === 0) { u = Math.random(); } // Avoid u == 0.
+        while (u === 0) { u = Math.random(); } // Avoid 0 to ensure a valid logarithm.
         while (v === 0) { v = Math.random(); }
         return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
     }
@@ -122,7 +122,7 @@ export class Visual implements IVisual {
      * @param data - Array of time/value pairs representing the GBM path.
      */
     private renderChart(data: { time: number, value: number }[]): void {
-        // Clear previous chart contents.
+        // Clear any previous chart contents.
         const chartContainer = d3.select(this.container).select("#chartContainer");
         chartContainer.selectAll("*").remove();
 
@@ -131,31 +131,31 @@ export class Visual implements IVisual {
         const width = 600 - margin.left - margin.right;
         const height = 400 - margin.top - margin.bottom;
 
-        // Append an SVG element to the container.
+        // Append an SVG element to the chart container.
         const svg = chartContainer.append("svg")
             .attr("width", width + margin.left + margin.right)
             .attr("height", height + margin.top + margin.bottom)
             .append("g")
             .attr("transform", `translate(${margin.left},${margin.top})`);
 
-        // Create x-scale (time axis).
+        // Create an x-scale (time axis).
         const xScale = d3.scaleLinear()
             .domain([0, d3.max(data, d => d.time)!])
             .range([0, width]);
 
-        // Create y-scale (value axis).
+        // Create a y-scale (value axis).
         const yMin = d3.min(data, d => d.value)!;
         const yMax = d3.max(data, d => d.value)!;
         const yScale = d3.scaleLinear()
             .domain([yMin, yMax])
             .range([height, 0]);
 
-        // Append the x-axis.
+        // Add the x-axis.
         svg.append("g")
             .attr("transform", `translate(0, ${height})`)
             .call(d3.axisBottom(xScale));
 
-        // Append the y-axis.
+        // Add the y-axis.
         svg.append("g")
             .call(d3.axisLeft(yScale));
 
