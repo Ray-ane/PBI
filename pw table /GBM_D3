@@ -18,25 +18,28 @@ export class Visual implements IVisual {
         this.container = document.createElement("div");
         this.container.className = "gbmVisualContainer";
 
-        // Create a flex container with two panels:
-        // Left panel for inputs and right panel for the chart.
+        // Create a flex container with a left panel for inputs and a right panel for the chart.
+        // The left panel includes a title and a blue background.
+        // The right panel includes a chart title.
         this.container.innerHTML = `
-            <div class="layout" style="display: flex; height: 100%;">
-                <div class="leftPanel" style="min-width: 150px; padding: 10px; border-right: 1px solid #ccc;">
+            <div class="layout" style="display: flex; height: 100%; font-family: Arial, sans-serif;">
+                <div class="leftPanel" style="min-width: 220px; padding: 15px; background-color: #0078D4; color: white; border-right: 1px solid #ccc;">
+                    <h2 style="margin-top: 0; font-size: 18px;">Parameters</h2>
                     <div class="inputSection">
-                        <div style="margin-bottom:5px;">
-                            <label for="muRange">Mu (drift): </label>
-                            <input id="muRange" type="range" min="-0.2" max="0.2" step="0.01" value="0.05" />
-                            <span id="muValue">0.05</span>
+                        <div style="margin-bottom:15px;">
+                            <label for="muRange" style="display: block; margin-bottom: 5px;">Mu (drift):</label>
+                            <input id="muRange" type="range" min="-0.2" max="0.2" step="0.01" value="0.05" style="width: 100%;" />
+                            <span id="muValue" style="font-weight: bold;">0.05</span>
                         </div>
-                        <div style="margin-bottom:5px;">
-                            <label for="sigmaRange">Sigma (volatility): </label>
-                            <input id="sigmaRange" type="range" min="0" max="0.5" step="0.01" value="0.2" />
-                            <span id="sigmaValue">0.2</span>
+                        <div style="margin-bottom:15px;">
+                            <label for="sigmaRange" style="display: block; margin-bottom: 5px;">Sigma (volatility):</label>
+                            <input id="sigmaRange" type="range" min="0" max="0.5" step="0.01" value="0.2" style="width: 100%;" />
+                            <span id="sigmaValue" style="font-weight: bold;">0.2</span>
                         </div>
                     </div>
                 </div>
-                <div class="rightPanel" style="flex-grow: 1; padding: 10px;">
+                <div class="rightPanel" style="flex-grow: 1; padding: 15px;">
+                    <h2 style="text-align: center; font-size: 20px; margin-top: 0;">Geometric Brownian Motion Simulation</h2>
                     <div id="chartContainer"></div>
                 </div>
             </div>
@@ -49,7 +52,7 @@ export class Visual implements IVisual {
         const muDisplay = this.container.querySelector("#muValue") as HTMLSpanElement;
         const sigmaDisplay = this.container.querySelector("#sigmaValue") as HTMLSpanElement;
 
-        // Update displayed values and trigger the simulation immediately on slider input.
+        // Update displayed values and trigger the simulation immediately when sliders are adjusted.
         muSlider.addEventListener("input", () => {
             muDisplay.innerText = muSlider.value;
             this.simulateAndRender();
@@ -69,7 +72,6 @@ export class Visual implements IVisual {
         // Retrieve current parameter values from the sliders.
         const muSlider = this.container.querySelector("#muRange") as HTMLInputElement;
         const sigmaSlider = this.container.querySelector("#sigmaRange") as HTMLInputElement;
-
         const mu = parseFloat(muSlider.value);
         const sigma = parseFloat(sigmaSlider.value);
 
@@ -122,12 +124,12 @@ export class Visual implements IVisual {
      * @param data - Array of time/value pairs representing the GBM path.
      */
     private renderChart(data: { time: number, value: number }[]): void {
-        // Clear any previous chart contents.
+        // Clear any previous chart content.
         const chartContainer = d3.select(this.container).select("#chartContainer");
         chartContainer.selectAll("*").remove();
 
         // Define chart margins and dimensions.
-        const margin = { top: 20, right: 20, bottom: 30, left: 50 };
+        const margin = { top: 20, right: 20, bottom: 40, left: 50 };
         const width = 600 - margin.left - margin.right;
         const height = 400 - margin.top - margin.bottom;
 
@@ -135,15 +137,17 @@ export class Visual implements IVisual {
         const svg = chartContainer.append("svg")
             .attr("width", width + margin.left + margin.right)
             .attr("height", height + margin.top + margin.bottom)
+            .style("background-color", "#f5f5f5")
+            .style("border", "1px solid #ccc")
             .append("g")
             .attr("transform", `translate(${margin.left},${margin.top})`);
 
-        // Create an x-scale (time axis).
+        // Create the x-scale (time axis).
         const xScale = d3.scaleLinear()
             .domain([0, d3.max(data, d => d.time)!])
             .range([0, width]);
 
-        // Create a y-scale (value axis).
+        // Create the y-scale (value axis).
         const yMin = d3.min(data, d => d.value)!;
         const yMax = d3.max(data, d => d.value)!;
         const yScale = d3.scaleLinear()
@@ -153,11 +157,26 @@ export class Visual implements IVisual {
         // Add the x-axis.
         svg.append("g")
             .attr("transform", `translate(0, ${height})`)
-            .call(d3.axisBottom(xScale));
+            .call(d3.axisBottom(xScale))
+            .append("text")
+            .attr("x", width / 2)
+            .attr("y", 35)
+            .attr("fill", "#000")
+            .style("font-size", "12px")
+            .style("text-anchor", "middle")
+            .text("Time");
 
         // Add the y-axis.
         svg.append("g")
-            .call(d3.axisLeft(yScale));
+            .call(d3.axisLeft(yScale))
+            .append("text")
+            .attr("transform", "rotate(-90)")
+            .attr("x", -height / 2)
+            .attr("y", -40)
+            .attr("fill", "#000")
+            .style("font-size", "12px")
+            .style("text-anchor", "middle")
+            .text("Value");
 
         // Define a line generator.
         const line = d3.line<{ time: number, value: number }>()
@@ -168,7 +187,7 @@ export class Visual implements IVisual {
         svg.append("path")
             .datum(data)
             .attr("fill", "none")
-            .attr("stroke", "steelblue")
+            .attr("stroke", "#0078D4")
             .attr("stroke-width", 2)
             .attr("d", line);
     }
