@@ -1,218 +1,31 @@
-"use strict";
+/* Style for WebKit-based browsers (Chrome, Safari, etc.) */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 20px;
+  width: 20px;
+  background: black;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  margin-top: -8px;  /* Adjust this value to vertically center the thumb on the track */
+}
 
-import "core-js/stable";
-import "./../style/visual.less";
+/* Style for Mozilla Firefox */
+input[type="range"]::-moz-range-thumb {
+  height: 20px;
+  width: 20px;
+  background: black;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
 
-import * as d3 from "d3";
-import powerbiVisualsApi from "powerbi-visuals-api";
-import IVisual = powerbiVisualsApi.extensibility.visual.IVisual;
-import VisualConstructorOptions = powerbiVisualsApi.extensibility.visual.VisualConstructorOptions;
-import VisualUpdateOptions = powerbiVisualsApi.extensibility.visual.VisualUpdateOptions;
-
-export class Visual implements IVisual {
-    private target: HTMLElement;
-    private container: HTMLElement;
-    // Dimensions for the chart area (computed based on the viewport)
-    private chartWidth: number = 600;
-    private chartHeight: number = 400;
-
-    constructor(options: VisualConstructorOptions) {
-        this.target = options.element;
-        this.container = document.createElement("div");
-        this.container.className = "gbmVisualContainer";
-        // Ensure the container fills the available space.
-        this.container.style.width = "100%";
-        this.container.style.height = "100%";
-
-        // Create a flex container with:
-        // - A left panel (fixed width) for parameters (with a title and blue background).
-        // - A right panel that will contain the chart (with its own title).
-        this.container.innerHTML = `
-            <div class="layout" style="display: flex; height: 100%; font-family: Arial, sans-serif;">
-                <div class="leftPanel" style="width: 220px; padding: 15px; background-color: #0078D4; color: white; box-sizing: border-box;">
-                    <h2 style="margin-top: 0; font-size: 18px;">Parameters</h2>
-                    <div class="inputSection">
-                        <div style="margin-bottom:15px;">
-                            <label for="muRange" style="display: block; margin-bottom: 5px;">Mu (drift):</label>
-                            <input id="muRange" type="range" min="-0.2" max="0.2" step="0.01" value="0.05" 
-                                   style="width: 100%; background-color: white;" />
-                            <span id="muValue" style="font-weight: bold;">0.05</span>
-                        </div>
-                        <div style="margin-bottom:15px;">
-                            <label for="sigmaRange" style="display: block; margin-bottom: 5px;">Sigma (volatility):</label>
-                            <input id="sigmaRange" type="range" min="0" max="0.5" step="0.01" value="0.2" 
-                                   style="width: 100%; background-color: white;" />
-                            <span id="sigmaValue" style="font-weight: bold;">0.2</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="rightPanel" style="flex-grow: 1; padding: 15px; box-sizing: border-box;">
-                    <h2 style="text-align: center; font-size: 20px; margin-top: 0;">Geometric Brownian Motion Simulation</h2>
-                    <div id="chartContainer" style="width: 100%; height: 100%;"></div>
-                </div>
-            </div>
-        `;
-        this.target.appendChild(this.container);
-
-        // Get references to the slider elements and their display spans.
-        const muSlider = this.container.querySelector("#muRange") as HTMLInputElement;
-        const sigmaSlider = this.container.querySelector("#sigmaRange") as HTMLInputElement;
-        const muDisplay = this.container.querySelector("#muValue") as HTMLSpanElement;
-        const sigmaDisplay = this.container.querySelector("#sigmaValue") as HTMLSpanElement;
-
-        // Update displayed values and re-run the simulation immediately when sliders are adjusted.
-        muSlider.addEventListener("input", () => {
-            muDisplay.innerText = muSlider.value;
-            this.simulateAndRender();
-        });
-        sigmaSlider.addEventListener("input", () => {
-            sigmaDisplay.innerText = sigmaSlider.value;
-            this.simulateAndRender();
-        });
-    }
-
-    // The update method is called whenever the visual is resized or refreshed.
-    public update(options: VisualUpdateOptions) {
-        // Retrieve the overall dimensions from the viewport.
-        const overallWidth = options.viewport.width;
-        const overallHeight = options.viewport.height;
-
-        // Set the container to exactly fill the viewport.
-        this.container.style.width = overallWidth + "px";
-        this.container.style.height = overallHeight + "px";
-
-        // The left panel has a fixed width (220px); the right panel gets the remaining space.
-        const leftPanelWidth = 220;
-        // Adjust the chart area dimensions based on available space and some padding.
-        this.chartWidth = overallWidth - leftPanelWidth - 30; // e.g., subtract 30px for padding/margins
-        this.chartHeight = overallHeight - 30; // e.g., subtract 30px for padding/margins
-
-        // Run the simulation and render the chart with the updated dimensions.
-        this.simulateAndRender();
-    }
-
-    private simulateAndRender(): void {
-        // Retrieve current parameter values from the sliders.
-        const muSlider = this.container.querySelector("#muRange") as HTMLInputElement;
-        const sigmaSlider = this.container.querySelector("#sigmaRange") as HTMLInputElement;
-        const mu = parseFloat(muSlider.value);
-        const sigma = parseFloat(sigmaSlider.value);
-
-        // Simulation parameters.
-        const S0 = 100;      // Starting value.
-        const steps = 200;   // Number of time steps.
-        const dt = 1 / steps; // Time increment.
-
-        // Generate a new GBM simulation path.
-        const path = this.simulateGBM(mu, sigma, S0, steps, dt);
-        // Render the simulation as a line chart.
-        this.renderChart(path);
-    }
-
-    /**
-     * Simulate a Geometric Brownian Motion (GBM) path.
-     * @param mu - Drift parameter.
-     * @param sigma - Volatility parameter.
-     * @param S0 - Initial value.
-     * @param steps - Number of simulation steps.
-     * @param dt - Time increment per step.
-     */
-    private simulateGBM(mu: number, sigma: number, S0: number, steps: number, dt: number)
-        : { time: number, value: number }[] {
-        let S = S0;
-        let path: { time: number, value: number }[] = [];
-        path.push({ time: 0, value: S });
-        for (let i = 1; i <= steps; i++) {
-            let t = i * dt;
-            // Generate a random sample from a standard normal distribution.
-            let dW = Math.sqrt(dt) * this.randomNormal();
-            S = S * Math.exp((mu - 0.5 * sigma * sigma) * dt + sigma * dW);
-            path.push({ time: t, value: S });
-        }
-        return path;
-    }
-
-    /**
-     * Generate a standard normally distributed random number using the Box-Muller transform.
-     */
-    private randomNormal(): number {
-        let u = 0, v = 0;
-        while (u === 0) { u = Math.random(); } // Avoid 0 to ensure a valid logarithm.
-        while (v === 0) { v = Math.random(); }
-        return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
-    }
-
-    /**
-     * Render a responsive line chart of the GBM path using D3.js.
-     * @param data - Array of time/value pairs representing the GBM path.
-     */
-    private renderChart(data: { time: number, value: number }[]): void {
-        // Clear any previous chart content.
-        const chartContainer = d3.select(this.container).select("#chartContainer");
-        chartContainer.selectAll("*").remove();
-
-        // Define margins for the chart.
-        const margin = { top: 20, right: 20, bottom: 40, left: 50 };
-        // Use the computed chartWidth and chartHeight from the update method.
-        const width = this.chartWidth - margin.left - margin.right;
-        const height = this.chartHeight - margin.top - margin.bottom;
-
-        // Append an SVG element to the chart container.
-        const svg = chartContainer.append("svg")
-            .attr("width", width + margin.left + margin.right)
-            .attr("height", height + margin.top + margin.bottom)
-            .style("background-color", "#f5f5f5")
-            .style("border", "1px solid #ccc")
-            .append("g")
-            .attr("transform", `translate(${margin.left},${margin.top})`);
-
-        // Create the x-scale (time axis).
-        const xScale = d3.scaleLinear()
-            .domain([0, d3.max(data, d => d.time)!])
-            .range([0, width]);
-
-        // Create the y-scale (value axis).
-        const yMin = d3.min(data, d => d.value)!;
-        const yMax = d3.max(data, d => d.value)!;
-        const yScale = d3.scaleLinear()
-            .domain([yMin, yMax])
-            .range([height, 0]);
-
-        // Add the x-axis.
-        svg.append("g")
-            .attr("transform", `translate(0, ${height})`)
-            .call(d3.axisBottom(xScale))
-            .append("text")
-            .attr("x", width / 2)
-            .attr("y", 35)
-            .attr("fill", "#000")
-            .style("font-size", "12px")
-            .style("text-anchor", "middle")
-            .text("Time");
-
-        // Add the y-axis.
-        svg.append("g")
-            .call(d3.axisLeft(yScale))
-            .append("text")
-            .attr("transform", "rotate(-90)")
-            .attr("x", -height / 2)
-            .attr("y", -40)
-            .attr("fill", "#000")
-            .style("font-size", "12px")
-            .style("text-anchor", "middle")
-            .text("Value");
-
-        // Define a line generator.
-        const line = d3.line<{ time: number, value: number }>()
-            .x(d => xScale(d.time))
-            .y(d => yScale(d.value));
-
-        // Draw the GBM path.
-        svg.append("path")
-            .datum(data)
-            .attr("fill", "none")
-            .attr("stroke", "#0078D4")
-            .attr("stroke-width", 2)
-            .attr("d", line);
-    }
+/* Style for Internet Explorer and Edge */
+input[type="range"]::-ms-thumb {
+  height: 20px;
+  width: 20px;
+  background: black;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
 }
