@@ -18,7 +18,8 @@ export class Visual implements IVisual {
         this.container = document.createElement("div");
         this.container.className = "gbmVisualContainer";
 
-        // Insert HTML for the two slider inputs and the chart container
+        // Insert HTML for the slider inputs and chart container.
+        // (The simulate button is kept optionally if you wish to re-run the simulation manually.)
         this.container.innerHTML = `
             <div class="inputSection" style="margin-bottom: 10px;">
                 <div style="margin-bottom:5px;">
@@ -31,38 +32,41 @@ export class Visual implements IVisual {
                     <input id="sigmaRange" type="range" min="0" max="0.5" step="0.01" value="0.2" />
                     <span id="sigmaValue">0.2</span>
                 </div>
+                <!-- Optional: A button if you want to manually re-run the simulation -->
                 <button id="simulateButton">Simulate</button>
             </div>
             <div id="chartContainer"></div>
         `;
         this.target.appendChild(this.container);
 
-        // Update displayed values when sliders move
+        // Get references to the sliders and display elements.
         const muSlider = this.container.querySelector("#muRange") as HTMLInputElement;
         const sigmaSlider = this.container.querySelector("#sigmaRange") as HTMLInputElement;
         const muDisplay = this.container.querySelector("#muValue") as HTMLSpanElement;
         const sigmaDisplay = this.container.querySelector("#sigmaValue") as HTMLSpanElement;
 
+        // Update the displayed values and re-run the simulation immediately on slider changes.
         muSlider.addEventListener("input", () => {
             muDisplay.innerText = muSlider.value;
+            this.simulateAndRender();
         });
         sigmaSlider.addEventListener("input", () => {
             sigmaDisplay.innerText = sigmaSlider.value;
+            this.simulateAndRender();
         });
 
-        // When the user clicks the simulate button, generate and render a new GBM path.
+        // Optional: Also update simulation on clicking the "Simulate" button.
         const simulateButton = this.container.querySelector("#simulateButton");
         simulateButton.addEventListener("click", () => this.simulateAndRender());
     }
 
     // The update method is called when the visual is refreshed.
-    // For this simulation example, we simply simulate and render a new path.
     public update(options: VisualUpdateOptions) {
         this.simulateAndRender();
     }
 
     private simulateAndRender(): void {
-        // Get mu and sigma values from the slider inputs.
+        // Retrieve current values from the sliders.
         const muSlider = this.container.querySelector("#muRange") as HTMLInputElement;
         const sigmaSlider = this.container.querySelector("#sigmaRange") as HTMLInputElement;
 
@@ -70,22 +74,22 @@ export class Visual implements IVisual {
         const sigma = parseFloat(sigmaSlider.value);
 
         // Simulation parameters:
-        const S0 = 100;      // starting value
-        const steps = 200;   // number of time steps
-        const dt = 1 / steps; // time increment
+        const S0 = 100;      // Starting value.
+        const steps = 200;   // Number of time steps.
+        const dt = 1 / steps; // Time increment per step.
 
-        // Simulate the GBM path.
+        // Generate a new GBM simulation path.
         const path = this.simulateGBM(mu, sigma, S0, steps, dt);
-        // Render the simulation as a line chart.
+        // Render the GBM path as a line chart.
         this.renderChart(path);
     }
 
     /**
-     * Simulate a GBM path.
+     * Simulate a Geometric Brownian Motion path.
      * @param mu - Drift parameter.
      * @param sigma - Volatility parameter.
      * @param S0 - Initial value.
-     * @param steps - Number of steps.
+     * @param steps - Number of simulation steps.
      * @param dt - Time increment per step.
      */
     private simulateGBM(mu: number, sigma: number, S0: number, steps: number, dt: number)
@@ -95,7 +99,7 @@ export class Visual implements IVisual {
         path.push({ time: 0, value: S });
         for (let i = 1; i <= steps; i++) {
             let t = i * dt;
-            // Generate a random sample from a standard normal distribution
+            // Generate a random sample from a standard normal distribution.
             let dW = Math.sqrt(dt) * this.randomNormal();
             S = S * Math.exp((mu - 0.5 * sigma * sigma) * dt + sigma * dW);
             path.push({ time: t, value: S });
@@ -108,7 +112,7 @@ export class Visual implements IVisual {
      */
     private randomNormal(): number {
         let u = 0, v = 0;
-        while (u === 0) { u = Math.random(); } // Convert [0,1) to (0,1)
+        while (u === 0) { u = Math.random(); } // Avoid u == 0.
         while (v === 0) { v = Math.random(); }
         return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
     }
@@ -118,49 +122,49 @@ export class Visual implements IVisual {
      * @param data - Array of time/value pairs representing the GBM path.
      */
     private renderChart(data: { time: number, value: number }[]): void {
-        // Clear any previous content in the chart container.
+        // Clear previous chart contents.
         const chartContainer = d3.select(this.container).select("#chartContainer");
         chartContainer.selectAll("*").remove();
 
-        // Define dimensions and margins for the SVG chart.
+        // Define chart margins and dimensions.
         const margin = { top: 20, right: 20, bottom: 30, left: 50 };
         const width = 600 - margin.left - margin.right;
         const height = 400 - margin.top - margin.bottom;
 
-        // Append the SVG element.
+        // Append an SVG element to the container.
         const svg = chartContainer.append("svg")
             .attr("width", width + margin.left + margin.right)
             .attr("height", height + margin.top + margin.bottom)
             .append("g")
             .attr("transform", `translate(${margin.left},${margin.top})`);
 
-        // Create an x-scale (time axis).
+        // Create x-scale (time axis).
         const xScale = d3.scaleLinear()
             .domain([0, d3.max(data, d => d.time)!])
             .range([0, width]);
 
-        // Create a y-scale (value axis).
+        // Create y-scale (value axis).
         const yMin = d3.min(data, d => d.value)!;
         const yMax = d3.max(data, d => d.value)!;
         const yScale = d3.scaleLinear()
             .domain([yMin, yMax])
             .range([height, 0]);
 
-        // Add the x-axis.
+        // Append the x-axis.
         svg.append("g")
             .attr("transform", `translate(0, ${height})`)
             .call(d3.axisBottom(xScale));
 
-        // Add the y-axis.
+        // Append the y-axis.
         svg.append("g")
             .call(d3.axisLeft(yScale));
 
-        // Create a line generator.
+        // Define a line generator.
         const line = d3.line<{ time: number, value: number }>()
             .x(d => xScale(d.time))
             .y(d => yScale(d.value));
 
-        // Append the line path.
+        // Draw the GBM path.
         svg.append("path")
             .datum(data)
             .attr("fill", "none")
