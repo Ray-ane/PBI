@@ -12,47 +12,55 @@ import VisualUpdateOptions = powerbiVisualsApi.extensibility.visual.VisualUpdate
 export class Visual implements IVisual {
     private target: HTMLElement;
     private container: HTMLElement;
+    // Dimensions for the chart area (computed based on the viewport)
+    private chartWidth: number = 600;
+    private chartHeight: number = 400;
 
     constructor(options: VisualConstructorOptions) {
         this.target = options.element;
         this.container = document.createElement("div");
         this.container.className = "gbmVisualContainer";
+        // Ensure the container fills the available space.
+        this.container.style.width = "100%";
+        this.container.style.height = "100%";
 
-        // Create a flex container with a left panel for inputs and a right panel for the chart.
-        // The left panel includes a title and a blue background.
-        // The right panel includes a chart title.
+        // Create a flex container with:
+        // - A left panel (fixed width) for parameters (with a title and blue background).
+        // - A right panel that will contain the chart (with its own title).
         this.container.innerHTML = `
             <div class="layout" style="display: flex; height: 100%; font-family: Arial, sans-serif;">
-                <div class="leftPanel" style="min-width: 220px; padding: 15px; background-color: #0078D4; color: white; border-right: 1px solid #ccc;">
+                <div class="leftPanel" style="width: 220px; padding: 15px; background-color: #0078D4; color: white; box-sizing: border-box;">
                     <h2 style="margin-top: 0; font-size: 18px;">Parameters</h2>
                     <div class="inputSection">
                         <div style="margin-bottom:15px;">
                             <label for="muRange" style="display: block; margin-bottom: 5px;">Mu (drift):</label>
-                            <input id="muRange" type="range" min="-0.2" max="0.2" step="0.01" value="0.05" style="width: 100%;" />
+                            <input id="muRange" type="range" min="-0.2" max="0.2" step="0.01" value="0.05" 
+                                   style="width: 100%; background-color: white;" />
                             <span id="muValue" style="font-weight: bold;">0.05</span>
                         </div>
                         <div style="margin-bottom:15px;">
                             <label for="sigmaRange" style="display: block; margin-bottom: 5px;">Sigma (volatility):</label>
-                            <input id="sigmaRange" type="range" min="0" max="0.5" step="0.01" value="0.2" style="width: 100%;" />
+                            <input id="sigmaRange" type="range" min="0" max="0.5" step="0.01" value="0.2" 
+                                   style="width: 100%; background-color: white;" />
                             <span id="sigmaValue" style="font-weight: bold;">0.2</span>
                         </div>
                     </div>
                 </div>
-                <div class="rightPanel" style="flex-grow: 1; padding: 15px;">
+                <div class="rightPanel" style="flex-grow: 1; padding: 15px; box-sizing: border-box;">
                     <h2 style="text-align: center; font-size: 20px; margin-top: 0;">Geometric Brownian Motion Simulation</h2>
-                    <div id="chartContainer"></div>
+                    <div id="chartContainer" style="width: 100%; height: 100%;"></div>
                 </div>
             </div>
         `;
         this.target.appendChild(this.container);
 
-        // Get references to the sliders and display elements.
+        // Get references to the slider elements and their display spans.
         const muSlider = this.container.querySelector("#muRange") as HTMLInputElement;
         const sigmaSlider = this.container.querySelector("#sigmaRange") as HTMLInputElement;
         const muDisplay = this.container.querySelector("#muValue") as HTMLSpanElement;
         const sigmaDisplay = this.container.querySelector("#sigmaValue") as HTMLSpanElement;
 
-        // Update displayed values and trigger the simulation immediately when sliders are adjusted.
+        // Update displayed values and re-run the simulation immediately when sliders are adjusted.
         muSlider.addEventListener("input", () => {
             muDisplay.innerText = muSlider.value;
             this.simulateAndRender();
@@ -63,8 +71,23 @@ export class Visual implements IVisual {
         });
     }
 
-    // Called when the visual is refreshed.
+    // The update method is called whenever the visual is resized or refreshed.
     public update(options: VisualUpdateOptions) {
+        // Retrieve the overall dimensions from the viewport.
+        const overallWidth = options.viewport.width;
+        const overallHeight = options.viewport.height;
+
+        // Set the container to exactly fill the viewport.
+        this.container.style.width = overallWidth + "px";
+        this.container.style.height = overallHeight + "px";
+
+        // The left panel has a fixed width (220px); the right panel gets the remaining space.
+        const leftPanelWidth = 220;
+        // Adjust the chart area dimensions based on available space and some padding.
+        this.chartWidth = overallWidth - leftPanelWidth - 30; // e.g., subtract 30px for padding/margins
+        this.chartHeight = overallHeight - 30; // e.g., subtract 30px for padding/margins
+
+        // Run the simulation and render the chart with the updated dimensions.
         this.simulateAndRender();
     }
 
@@ -82,7 +105,7 @@ export class Visual implements IVisual {
 
         // Generate a new GBM simulation path.
         const path = this.simulateGBM(mu, sigma, S0, steps, dt);
-        // Render the GBM path as a line chart.
+        // Render the simulation as a line chart.
         this.renderChart(path);
     }
 
@@ -120,7 +143,7 @@ export class Visual implements IVisual {
     }
 
     /**
-     * Render a line chart of the GBM path using D3.js.
+     * Render a responsive line chart of the GBM path using D3.js.
      * @param data - Array of time/value pairs representing the GBM path.
      */
     private renderChart(data: { time: number, value: number }[]): void {
@@ -128,10 +151,11 @@ export class Visual implements IVisual {
         const chartContainer = d3.select(this.container).select("#chartContainer");
         chartContainer.selectAll("*").remove();
 
-        // Define chart margins and dimensions.
+        // Define margins for the chart.
         const margin = { top: 20, right: 20, bottom: 40, left: 50 };
-        const width = 600 - margin.left - margin.right;
-        const height = 400 - margin.top - margin.bottom;
+        // Use the computed chartWidth and chartHeight from the update method.
+        const width = this.chartWidth - margin.left - margin.right;
+        const height = this.chartHeight - margin.top - margin.bottom;
 
         // Append an SVG element to the chart container.
         const svg = chartContainer.append("svg")
