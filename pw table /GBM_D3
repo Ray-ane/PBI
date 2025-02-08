@@ -71,6 +71,9 @@ export class Visual implements IVisual {
             sigmaDisplay.innerText = sigmaSlider.value;
             this.simulateAndRender();
         });
+
+        // *** New: Call simulateAndRender immediately so the chart displays on load ***
+        this.simulateAndRender();
     }
 
     // The update method is called when the visual is loaded or resized.
@@ -86,12 +89,10 @@ export class Visual implements IVisual {
         // The left panel has a fixed width (220px); the right panel gets the remaining space.
         const leftPanelWidth = 220;
         // Adjust the chart area dimensions based on available space and some padding.
-        this.chartWidth = overallWidth - leftPanelWidth - 30; // subtracting extra space for padding/margins
-        this.chartHeight = overallHeight - 30; // subtracting extra space for padding/margins
+        this.chartWidth = overallWidth - leftPanelWidth - 30; // subtract extra space for padding/margins
+        this.chartHeight = overallHeight - 30; // subtract extra space for padding/margins
 
         // Run the simulation and render the chart with the updated dimensions.
-        // This call uses the default preset values from the sliders,
-        // so the chart is displayed immediately upon visual load.
         this.simulateAndRender();
     }
 
@@ -99,8 +100,9 @@ export class Visual implements IVisual {
         // Retrieve current parameter values from the sliders.
         const muSlider = this.container.querySelector("#muRange") as HTMLInputElement;
         const sigmaSlider = this.container.querySelector("#sigmaRange") as HTMLInputElement;
-        const mu = parseFloat(muSlider.value);
-        const sigma = parseFloat(sigmaSlider.value);
+        // If for some reason the sliders are not found, use default values.
+        const mu = muSlider ? parseFloat(muSlider.value) : 0.05;
+        const sigma = sigmaSlider ? parseFloat(sigmaSlider.value) : 0.2;
 
         // Simulation parameters.
         const S0 = 100;      // Starting value.
