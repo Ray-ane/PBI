@@ -1,0 +1,171 @@
+"use strict";
+
+import "core-js/stable";
+import "./../style/visual.less";
+
+import * as d3 from "d3";
+import powerbiVisualsApi from "powerbi-visuals-api";
+import IVisual = powerbiVisualsApi.extensibility.visual.IVisual;
+import VisualConstructorOptions = powerbiVisualsApi.extensibility.visual.VisualConstructorOptions;
+import VisualUpdateOptions = powerbiVisualsApi.extensibility.visual.VisualUpdateOptions;
+
+export class Visual implements IVisual {
+    private target: HTMLElement;
+    private container: HTMLElement;
+
+    constructor(options: VisualConstructorOptions) {
+        this.target = options.element;
+        this.container = document.createElement("div");
+        this.container.className = "gbmVisualContainer";
+
+        // Insert HTML for the two slider inputs and the chart container
+        this.container.innerHTML = `
+            <div class="inputSection" style="margin-bottom: 10px;">
+                <div style="margin-bottom:5px;">
+                    <label for="muRange">Mu (drift): </label>
+                    <input id="muRange" type="range" min="-0.2" max="0.2" step="0.01" value="0.05" />
+                    <span id="muValue">0.05</span>
+                </div>
+                <div style="margin-bottom:5px;">
+                    <label for="sigmaRange">Sigma (volatility): </label>
+                    <input id="sigmaRange" type="range" min="0" max="0.5" step="0.01" value="0.2" />
+                    <span id="sigmaValue">0.2</span>
+                </div>
+                <button id="simulateButton">Simulate</button>
+            </div>
+            <div id="chartContainer"></div>
+        `;
+        this.target.appendChild(this.container);
+
+        // Update displayed values when sliders move
+        const muSlider = this.container.querySelector("#muRange") as HTMLInputElement;
+        const sigmaSlider = this.container.querySelector("#sigmaRange") as HTMLInputElement;
+        const muDisplay = this.container.querySelector("#muValue") as HTMLSpanElement;
+        const sigmaDisplay = this.container.querySelector("#sigmaValue") as HTMLSpanElement;
+
+        muSlider.addEventListener("input", () => {
+            muDisplay.innerText = muSlider.value;
+        });
+        sigmaSlider.addEventListener("input", () => {
+            sigmaDisplay.innerText = sigmaSlider.value;
+        });
+
+        // When the user clicks the simulate button, generate and render a new GBM path.
+        const simulateButton = this.container.querySelector("#simulateButton");
+        simulateButton.addEventListener("click", () => this.simulateAndRender());
+    }
+
+    // The update method is called when the visual is refreshed.
+    // For this simulation example, we simply simulate and render a new path.
+    public update(options: VisualUpdateOptions) {
+        this.simulateAndRender();
+    }
+
+    private simulateAndRender(): void {
+        // Get mu and sigma values from the slider inputs.
+        const muSlider = this.container.querySelector("#muRange") as HTMLInputElement;
+        const sigmaSlider = this.container.querySelector("#sigmaRange") as HTMLInputElement;
+
+        const mu = parseFloat(muSlider.value);
+        const sigma = parseFloat(sigmaSlider.value);
+
+        // Simulation parameters:
+        const S0 = 100;      // starting value
+        const steps = 200;   // number of time steps
+        const dt = 1 / steps; // time increment
+
+        // Simulate the GBM path.
+        const path = this.simulateGBM(mu, sigma, S0, steps, dt);
+        // Render the simulation as a line chart.
+        this.renderChart(path);
+    }
+
+    /**
+     * Simulate a GBM path.
+     * @param mu - Drift parameter.
+     * @param sigma - Volatility parameter.
+     * @param S0 - Initial value.
+     * @param steps - Number of steps.
+     * @param dt - Time increment per step.
+     */
+    private simulateGBM(mu: number, sigma: number, S0: number, steps: number, dt: number)
+        : { time: number, value: number }[] {
+        let S = S0;
+        let path: { time: number, value: number }[] = [];
+        path.push({ time: 0, value: S });
+        for (let i = 1; i <= steps; i++) {
+            let t = i * dt;
+            // Generate a random sample from a standard normal distribution
+            let dW = Math.sqrt(dt) * this.randomNormal();
+            S = S * Math.exp((mu - 0.5 * sigma * sigma) * dt + sigma * dW);
+            path.push({ time: t, value: S });
+        }
+        return path;
+    }
+
+    /**
+     * Generate a standard normally distributed random number using the Box-Muller transform.
+     */
+    private randomNormal(): number {
+        let u = 0, v = 0;
+        while (u === 0) { u = Math.random(); } // Convert [0,1) to (0,1)
+        while (v === 0) { v = Math.random(); }
+        return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    }
+
+    /**
+     * Render a line chart of the GBM path using D3.js.
+     * @param data - Array of time/value pairs representing the GBM path.
+     */
+    private renderChart(data: { time: number, value: number }[]): void {
+        // Clear any previous content in the chart container.
+        const chartContainer = d3.select(this.container).select("#chartContainer");
+        chartContainer.selectAll("*").remove();
+
+        // Define dimensions and margins for the SVG chart.
+        const margin = { top: 20, right: 20, bottom: 30, left: 50 };
+        const width = 600 - margin.left - margin.right;
+        const height = 400 - margin.top - margin.bottom;
+
+        // Append the SVG element.
+        const svg = chartContainer.append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        // Create an x-scale (time axis).
+        const xScale = d3.scaleLinear()
+            .domain([0, d3.max(data, d => d.time)!])
+            .range([0, width]);
+
+        // Create a y-scale (value axis).
+        const yMin = d3.min(data, d => d.value)!;
+        const yMax = d3.max(data, d => d.value)!;
+        const yScale = d3.scaleLinear()
+            .domain([yMin, yMax])
+            .range([height, 0]);
+
+        // Add the x-axis.
+        svg.append("g")
+            .attr("transform", `translate(0, ${height})`)
+            .call(d3.axisBottom(xScale));
+
+        // Add the y-axis.
+        svg.append("g")
+            .call(d3.axisLeft(yScale));
+
+        // Create a line generator.
+        const line = d3.line<{ time: number, value: number }>()
+            .x(d => xScale(d.time))
+            .y(d => yScale(d.value));
+
+        // Append the line path.
+        svg.append("path")
+            .datum(data)
+            .attr("fill", "none")
+            .attr("stroke", "steelblue")
+            .attr("stroke-width", 2)
+            .attr("d", line);
+    }
+}
