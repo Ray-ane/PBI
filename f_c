@@ -1,0 +1,63 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": { "url": "data.json" },
+  "layer": [
+    {
+      "transform": [
+        {
+          "calculate": "datum.y - datum.fitted_y",
+          "as": "diff"
+        },
+        {
+          "filter": "datum.x1 > 0 && datum.x1 <= 30"
+        }
+      ],
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "x1",
+          "type": "quantitative",
+          "axis": { "title": null }
+        },
+        "y": {
+          "field": "y",
+          "type": "quantitative",
+          "axis": { "title": null }
+        },
+        "color": {
+          "field": "diff",
+          "type": "quantitative",
+          "scale": {
+            "domain": [-20, 0, 20],
+            "range": ["green", "white", "red"],
+            "domainMid": 0
+          },
+          "legend": { "title": "Difference (y - fitted_y)" }
+        }
+      }
+    },
+    {
+      "transform": [
+        {
+          "filter": "datum.x2 > 0 && datum.x2 <= 30"
+        }
+      ],
+      "mark": {
+        "type": "line",
+        "color": "black"
+      },
+      "encoding": {
+        "x": {
+          "field": "x2",
+          "type": "quantitative",
+          "axis": { "title": null }
+        },
+        "y": {
+          "field": "fitted_y",
+          "type": "quantitative",
+          "axis": { "title": null }
+        }
+      }
+    }
+  ]
+}
