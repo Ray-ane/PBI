@@ -1,24 +1,19 @@
 FlagMeasure =
 VAR currentValue = [Assets Value]
+VAR assetValuesTable =
+    ADDCOLUMNS(
+        ALL('Assets'[asset]),
+        "AssetValue", [Assets Value]
+    )
 VAR maxPositive =
     MAXX(
-        FILTER(
-            ALL('Assets'[asset]),
-            CALCULATE([Assets Value]) > 0
-        ),
-        CALCULATE([Assets Value])
+        FILTER(assetValuesTable, [AssetValue] > 0),
+        [AssetValue]
     )
 VAR minNegative =
     MINX(
-        FILTER(
-            ALL('Assets'[asset]),
-            CALCULATE([Assets Value]) < 0
-        ),
-        CALCULATE([Assets Value])
+        FILTER(assetValuesTable, [AssetValue] < 0),
+        [AssetValue]
     )
 RETURN
-    IF(
-        currentValue = maxPositive || currentValue = minNegative,
-        1,
-        0
-    )
+    IF(currentValue = maxPositive || currentValue = minNegative, 1, 0)
