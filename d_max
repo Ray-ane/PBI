@@ -1,0 +1,20 @@
+FlagMeasure =
+VAR maxPositive =
+    CALCULATE(
+        MAX(Assets[value]),
+        ALL(Assets),
+        Assets[value] > 0
+    )
+VAR minNegative =
+    CALCULATE(
+        MIN(Assets[value]),
+        ALL(Assets),
+        Assets[value] < 0
+    )
+RETURN
+    IF(
+        Assets[value] = maxPositive
+            || Assets[value] = minNegative,
+        1,
+        0
+    )
