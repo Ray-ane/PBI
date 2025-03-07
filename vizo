@@ -12,7 +12,7 @@ export class Visual implements IVisual {
     private target: HTMLElement;
     private dataView: DataView | undefined;
 
-    // Store all historical data by Geo:
+    // Data organized by Geo
     private allData: { [geo: string]: { year: number; ratio: number }[] } = {};
     private geos: string[] = [];
     private selectedGeo: string | undefined;
@@ -29,68 +29,131 @@ export class Visual implements IVisual {
     constructor(options: VisualConstructorOptions) {
         this.target = options.element;
 
-        // Build overall HTML structure:
-        // 1. Overall page title
-        // 2. Left sidebar (Geo dropdown & sliders) with background color changed
-        // 3. Main content area split into center-left and center-right chart containers.
+        // Build overall HTML structure with two pages.
+        // Both pages share the same header and sidebar.
+        // The main content area differs:
+        // - Page1 shows the simulation chart.
+        // - Page2 is a placeholder for other charts.
         this.target.innerHTML = `
-            <div style="display: flex; flex-direction: column; height: 100%;">
-                <!-- Overall page title -->
-                <div style="padding: 10px; text-align: center;">
+            <div id="pagesContainer" style="height: 100%; display: flex; flex-direction: column;">
+                <!-- Header -->
+                <div style="padding: 10px; text-align: center; background: #e8e8e8;">
                     <h1>Debt-to-GDP Simulation Dashboard</h1>
                 </div>
-                <div style="display: flex; flex: 1 1 auto; border-top: 1px solid #ccc;">
-                    <!-- Sidebar with dropdown & sliders -->
-                    <div style="width: 220px; background-color: #f0f0f0; padding: 10px; border-right: 1px solid #ccc;">
-                        <div style="margin-bottom: 15px;">
-                            <label>Geo</label><br>
-                            <select id="geoDropdown" style="width: 100%;"></select>
+                <!-- Page 1 -->
+                <div id="page1" style="flex: 1; display: block;">
+                    <div style="display: flex; height: 100%;">
+                        <!-- Sidebar -->
+                        <div style="width: 220px; background-color: #f0f0f0; padding: 10px; border-right: 1px solid #ccc;">
+                            <div style="margin-bottom: 15px;">
+                                <label>Geo</label><br>
+                                <select id="geoDropdown" style="width: 100%;"></select>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label>10-Year Bond Yield (%)</label><br>
+                                <input type="range" id="bondYield" min="-0.1" max="5" step="0.1" value="2">
+                                <span id="bondYieldVal">2</span>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label>Spread vs Bund (bp)</label><br>
+                                <input type="range" id="spread" min="0" max="300" step="10" value="50">
+                                <span id="spreadVal">50</span>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label>Inflation (YoY %)</label><br>
+                                <input type="range" id="inflation" min="0" max="10" step="0.1" value="2">
+                                <span id="inflationVal">2</span>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label>Real GDP Growth (YoY %)</label><br>
+                                <input type="range" id="realGrowth" min="-5" max="10" step="0.1" value="2">
+                                <span id="realGrowthVal">2</span>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label>Primary Surplus (% of GDP)</label><br>
+                                <input type="range" id="primarySurplus" min="-5" max="5" step="0.1" value="0">
+                                <span id="primarySurplusVal">0</span>
+                            </div>
+                            <!-- Navigation Button -->
+                            <div style="text-align: center; margin-top: 20px;">
+                                <button id="btnToPage2">Go to Second Page</button>
+                            </div>
                         </div>
-                        <div style="margin-bottom: 10px;">
-                            <label>10-Year Bond Yield (%)</label><br>
-                            <input type="range" id="bondYield" min="-0.1" max="5" step="0.1" value="2">
-                            <span id="bondYieldVal">2</span>
-                        </div>
-                        <div style="margin-bottom: 10px;">
-                            <label>Spread vs Bund (bp)</label><br>
-                            <input type="range" id="spread" min="0" max="300" step="10" value="50">
-                            <span id="spreadVal">50</span>
-                        </div>
-                        <div style="margin-bottom: 10px;">
-                            <label>Inflation (YoY %)</label><br>
-                            <input type="range" id="inflation" min="0" max="10" step="0.1" value="2">
-                            <span id="inflationVal">2</span>
-                        </div>
-                        <div style="margin-bottom: 10px;">
-                            <label>Real GDP Growth (YoY %)</label><br>
-                            <input type="range" id="realGrowth" min="-5" max="10" step="0.1" value="2">
-                            <span id="realGrowthVal">2</span>
-                        </div>
-                        <div style="margin-bottom: 10px;">
-                            <label>Primary Surplus (% of GDP)</label><br>
-                            <input type="range" id="primarySurplus" min="-5" max="5" step="0.1" value="0">
-                            <span id="primarySurplusVal">0</span>
+                        <!-- Main content area for Page 1 -->
+                        <div style="flex: 1; display: flex; flex-direction: row; padding: 10px;">
+                            <!-- Center Left: Simulation Chart -->
+                            <div style="flex: 1; margin-right: 10px; border: 1px solid #ccc; padding: 10px; position: relative;">
+                                <h3 style="text-align: center; margin: 0 0 10px 0;">Historical & Simulated Debt-to-GDP</h3>
+                                <div id="d3ChartLeft" style="width: 100%; height: calc(100% - 40px);"></div>
+                            </div>
+                            <!-- Center Right: Placeholder Chart -->
+                            <div style="flex: 1; margin-left: 10px; border: 1px solid #ccc; padding: 10px; position: relative;">
+                                <h3 style="text-align: center; margin: 0 0 10px 0;">[Future Chart Placeholder]</h3>
+                                <div id="d3ChartRight" style="width: 100%; height: calc(100% - 40px);"></div>
+                            </div>
                         </div>
                     </div>
-                    <!-- Main content area: two chart containers -->
-                    <div style="flex: 1; display: flex; flex-direction: row; padding: 10px;">
-                        <!-- Center left: Line chart container -->
-                        <div style="flex: 1; margin-right: 10px; border: 1px solid #ccc; padding: 10px; position: relative;">
-                            <h3 style="text-align: center; margin: 0 0 10px 0;">Historical & Simulated Debt-to-GDP</h3>
-                            <div id="d3ChartLeft" style="width: 100%; height: calc(100% - 40px);"></div>
+                </div>
+                <!-- Page 2 -->
+                <div id="page2" style="flex: 1; display: none;">
+                    <div style="display: flex; height: 100%;">
+                        <!-- Sidebar (duplicated for Page 2) -->
+                        <div style="width: 220px; background-color: #f0f0f0; padding: 10px; border-right: 1px solid #ccc;">
+                            <div style="margin-bottom: 15px;">
+                                <label>Geo</label><br>
+                                <select id="geoDropdownPage2" style="width: 100%;"></select>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label>10-Year Bond Yield (%)</label><br>
+                                <input type="range" id="bondYieldPage2" min="-0.1" max="5" step="0.1" value="2">
+                                <span id="bondYieldValPage2">2</span>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label>Spread vs Bund (bp)</label><br>
+                                <input type="range" id="spreadPage2" min="0" max="300" step="10" value="50">
+                                <span id="spreadValPage2">50</span>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label>Inflation (YoY %)</label><br>
+                                <input type="range" id="inflationPage2" min="0" max="10" step="0.1" value="2">
+                                <span id="inflationValPage2">2</span>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label>Real GDP Growth (YoY %)</label><br>
+                                <input type="range" id="realGrowthPage2" min="-5" max="10" step="0.1" value="2">
+                                <span id="realGrowthValPage2">2</span>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label>Primary Surplus (% of GDP)</label><br>
+                                <input type="range" id="primarySurplusPage2" min="-5" max="5" step="0.1" value="0">
+                                <span id="primarySurplusValPage2">0</span>
+                            </div>
+                            <!-- Navigation Button -->
+                            <div style="text-align: center; margin-top: 20px;">
+                                <button id="btnToPage1">Back to Main Page</button>
+                            </div>
                         </div>
-                        <!-- Center right: Placeholder for another chart -->
-                        <div style="flex: 1; margin-left: 10px; border: 1px solid #ccc; padding: 10px; position: relative;">
-                            <h3 style="text-align: center; margin: 0 0 10px 0;">[Future Chart Placeholder]</h3>
-                            <div id="d3ChartRight" style="width: 100%; height: calc(100% - 40px);"></div>
+                        <!-- Main content area for Page 2 -->
+                        <div style="flex: 1; display: flex; flex-direction: row; padding: 10px;">
+                            <!-- Center Left: Placeholder for Other Charts -->
+                            <div style="flex: 1; margin-right: 10px; border: 1px solid #ccc; padding: 10px; position: relative;">
+                                <h3 style="text-align: center; margin: 0 0 10px 0;">Other Charts</h3>
+                                <div id="d3ChartPage2" style="width: 100%; height: calc(100% - 40px);"></div>
+                            </div>
+                            <!-- Center Right: (Optional additional content) -->
+                            <div style="flex: 1; margin-left: 10px; border: 1px solid #ccc; padding: 10px; position: relative;">
+                                <h3 style="text-align: center; margin: 0 0 10px 0;">[Additional Content Placeholder]</h3>
+                                <div id="d3ChartPage2Right" style="width: 100%; height: calc(100% - 40px);"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         `;
 
-        // Attach slider listeners
+        // --- Attach Event Listeners for Page 1 Controls ---
         const self = this;
+        // Sidebar inputs for Page 1
         (document.getElementById("bondYield") as HTMLInputElement).addEventListener("input", function () {
             self.sliderValues.bondYield = parseFloat(this.value);
             document.getElementById("bondYieldVal")!.textContent = this.value;
@@ -116,25 +179,85 @@ export class Visual implements IVisual {
             document.getElementById("primarySurplusVal")!.textContent = this.value;
             self.updateChart();
         });
-
-        // Attach Geo dropdown listener
         (document.getElementById("geoDropdown") as HTMLSelectElement).addEventListener("change", function () {
             self.selectedGeo = this.value;
             self.updateChart();
         });
+        // Navigation button from Page 1 to Page 2
+        (document.getElementById("btnToPage2") as HTMLButtonElement).addEventListener("click", function () {
+            self.navigateToPage(2);
+        });
+
+        // --- Attach Event Listeners for Page 2 Controls ---
+        // (For simplicity, we mirror the controls; in a full solution, you might share state.)
+        (document.getElementById("bondYieldPage2") as HTMLInputElement).addEventListener("input", function () {
+            self.sliderValues.bondYield = parseFloat(this.value);
+            document.getElementById("bondYieldValPage2")!.textContent = this.value;
+            self.updateChart();
+            self.renderPage2Chart(); // update Page 2 chart as well
+        });
+        (document.getElementById("spreadPage2") as HTMLInputElement).addEventListener("input", function () {
+            self.sliderValues.spread = parseFloat(this.value);
+            document.getElementById("spreadValPage2")!.textContent = this.value;
+            self.updateChart();
+            self.renderPage2Chart();
+        });
+        (document.getElementById("inflationPage2") as HTMLInputElement).addEventListener("input", function () {
+            self.sliderValues.inflation = parseFloat(this.value);
+            document.getElementById("inflationValPage2")!.textContent = this.value;
+            self.updateChart();
+            self.renderPage2Chart();
+        });
+        (document.getElementById("realGrowthPage2") as HTMLInputElement).addEventListener("input", function () {
+            self.sliderValues.realGrowth = parseFloat(this.value);
+            document.getElementById("realGrowthValPage2")!.textContent = this.value;
+            self.updateChart();
+            self.renderPage2Chart();
+        });
+        (document.getElementById("primarySurplusPage2") as HTMLInputElement).addEventListener("input", function () {
+            self.sliderValues.primarySurplus = parseFloat(this.value);
+            document.getElementById("primarySurplusValPage2")!.textContent = this.value;
+            self.updateChart();
+            self.renderPage2Chart();
+        });
+        (document.getElementById("geoDropdownPage2") as HTMLSelectElement).addEventListener("change", function () {
+            self.selectedGeo = this.value;
+            self.updateChart();
+            self.renderPage2Chart();
+        });
+        // Navigation button from Page 2 to Page 1
+        (document.getElementById("btnToPage1") as HTMLButtonElement).addEventListener("click", function () {
+            self.navigateToPage(1);
+        });
+    }
+
+    // Switch pages by toggling display of page1 and page2 containers
+    private navigateToPage(pageNumber: number): void {
+        const page1 = document.getElementById("page1");
+        const page2 = document.getElementById("page2");
+        if (pageNumber === 1) {
+            page1!.style.display = "block";
+            page2!.style.display = "none";
+        } else {
+            page1!.style.display = "none";
+            page2!.style.display = "block";
+            // Render Page 2 chart placeholder
+            this.renderPage2Chart();
+        }
     }
 
     public update(options: VisualUpdateOptions): void {
         if (options.dataViews && options.dataViews[0]) {
             this.dataView = options.dataViews[0];
         }
-        // Parse data from DataView, populate dropdown, and update chart
+        // Parse data, populate dropdowns, and update charts on both pages
         this.parseData();
         this.populateDropdown();
         this.updateChart();
+        this.renderPage2Chart();
     }
 
-    // Parse table rows: [Geo, Year, GrossDebt, NominalGDP]
+    // Parse DataView table rows: [Geo, Year, GrossDebt, NominalGDP]
     private parseData(): void {
         this.allData = {};
         this.geos = [];
@@ -163,26 +286,35 @@ export class Visual implements IVisual {
         this.geos = Object.keys(this.allData);
     }
 
-    // Populate the Geo dropdown
+    // Populate Geo dropdowns on both pages
     private populateDropdown(): void {
-        const dropdown = document.getElementById("geoDropdown") as HTMLSelectElement;
-        dropdown.innerHTML = "";
+        const dropdown1 = document.getElementById("geoDropdown") as HTMLSelectElement;
+        dropdown1.innerHTML = "";
         this.geos.forEach((geo) => {
             const option = document.createElement("option");
             option.value = geo;
             option.text = geo;
-            dropdown.appendChild(option);
+            dropdown1.appendChild(option);
         });
-        // Default selection if none set or if current selection is missing
+        const dropdown2 = document.getElementById("geoDropdownPage2") as HTMLSelectElement;
+        dropdown2.innerHTML = "";
+        this.geos.forEach((geo) => {
+            const option = document.createElement("option");
+            option.value = geo;
+            option.text = geo;
+            dropdown2.appendChild(option);
+        });
+        // Default selection if none set
         if (!this.selectedGeo || this.geos.indexOf(this.selectedGeo) === -1) {
             this.selectedGeo = this.geos.length > 0 ? this.geos[0] : undefined;
         }
         if (this.selectedGeo) {
-            dropdown.value = this.selectedGeo;
+            dropdown1.value = this.selectedGeo;
+            dropdown2.value = this.selectedGeo;
         }
     }
 
-    // Update the chart: filter historical data, simulate, and render
+    // Update simulation chart on Page 1
     private updateChart(): void {
         if (!this.selectedGeo || !this.allData[this.selectedGeo]) {
             return;
@@ -204,7 +336,7 @@ export class Visual implements IVisual {
         const result: { year: number, ratio: number }[] = [];
         let currentRatio = lastHistRatio;
 
-        // Convert slider values: user "2" → 0.02, "50" bp → 0.005, etc.
+        // Convert slider values (e.g. user "2" → 0.02, "50" bp → 0.005, etc.)
         const i_bond = this.sliderValues.bondYield / 100;
         const i_spread = this.sliderValues.spread / 10000;
         const i_inflation = this.sliderValues.inflation / 100;
@@ -220,9 +352,7 @@ export class Visual implements IVisual {
         return result;
     }
 
-    // Render a line chart with D3.js including:
-    // - A grey shaded area from 2023 onward for simulation
-    // - A tooltip that shows historical vs simulated info and the difference from 2023's value.
+    // Render the Page 1 line chart with grey simulation area and tooltip
     private renderLineChart(data: { year: number, ratio: number }[], historical: { year: number, ratio: number }[]): void {
         const chartDiv = d3.select("#d3ChartLeft");
         chartDiv.selectAll("*").remove();
@@ -236,21 +366,18 @@ export class Visual implements IVisual {
         const svg = chartDiv.append("svg")
             .attr("width", width)
             .attr("height", height);
-
         const g = svg.append("g")
             .attr("transform", `translate(${margin.left},${margin.top})`);
 
-        // Define scales
         const x = d3.scaleLinear()
             .domain(d3.extent(data, d => d.year) as [number, number])
             .range([0, innerWidth]);
-
         const y = d3.scaleLinear()
             .domain([d3.min(data, d => d.ratio) ?? 0, d3.max(data, d => d.ratio) ?? 100])
             .nice()
             .range([innerHeight, 0]);
 
-        // Add grey shaded area for simulation (from 2023 onward)
+        // Grey shaded area for simulation (from 2023 onward)
         const simulationStartYear = 2023;
         g.append("rect")
             .attr("x", x(simulationStartYear))
@@ -260,16 +387,14 @@ export class Visual implements IVisual {
             .attr("fill", "#ccc")
             .attr("opacity", 0.3);
 
-        // Draw axes
         const xAxis = d3.axisBottom(x).tickFormat(d3.format("d"));
         const yAxis = d3.axisLeft(y);
         g.append("g")
             .attr("transform", `translate(0,${innerHeight})`)
             .call(xAxis);
-        g.append("g")
-            .call(yAxis);
+        g.append("g").call(yAxis);
 
-        // Draw the continuous line
+        // Draw continuous line chart
         const line = d3.line<{ year: number, ratio: number }>()
             .x(d => x(d.year))
             .y(d => y(d.ratio));
@@ -289,11 +414,7 @@ export class Visual implements IVisual {
             .style("padding", "5px")
             .style("pointer-events", "none")
             .style("display", "none");
-
-        // Last historical ratio for reference (2023 value)
         const lastHistorical = historical[historical.length - 1].ratio;
-
-        // Overlay to capture mouse events
         g.append("rect")
             .attr("width", innerWidth)
             .attr("height", innerHeight)
@@ -324,4 +445,25 @@ export class Visual implements IVisual {
                 tooltip.style("display", "none");
             });
     }
+
+    // Render a placeholder chart for Page 2 ("Other Charts")
+    private renderPage2Chart(): void {
+        const chartDiv = d3.select("#d3ChartPage2");
+        chartDiv.selectAll("*").remove();
+        const margin = { top: 20, right: 20, bottom: 30, left: 50 };
+        const width = (chartDiv.node() as HTMLElement).clientWidth || 400;
+        const height = (chartDiv.node() as HTMLElement).clientHeight || 300;
+        const svg = chartDiv.append("svg")
+            .attr("width", width)
+            .attr("height", height);
+        // For demonstration, simply add a placeholder text.
+        svg.append("text")
+            .attr("x", width / 2)
+            .attr("y", height / 2)
+            .attr("text-anchor", "middle")
+            .attr("dominant-baseline", "middle")
+            .style("font-size", "16px")
+            .text("Other Charts Placeholder");
+    }
 }
+
