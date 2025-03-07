@@ -3,48 +3,44 @@
 
 
 
-import * as Plotly from 'plotly.js-dist';
+import { Visual } from "./visual";
+import powerbiVisualsApi from "powerbi-visuals-api";
+import IVisualHost = powerbiVisualsApi.extensibility.visual.IVisualHost;
+import DataView = powerbiVisualsApi.DataView;
+import IViewport = powerbiVisualsApi.IViewport;
 
-export class Visual implements IVisual {
-  private target: HTMLElement;
+import Plotly from 'plotly.js-dist-min';
 
-  constructor(options: VisualConstructorOptions) {
-    this.target = options.element;
-    // Clear any existing content
-    this.target.innerHTML = "";
-  }
+export class Visual implements powerbiVisualsApi.extensibility.visual.IVisual {
+    private host: IVisualHost;
+    private target: HTMLElement;
 
-  public update(options: VisualUpdateOptions) {
-    // Clear previous rendering
-    this.target.innerHTML = "";
+    constructor(options: powerbiVisualsApi.extensibility.visual.VisualConstructorOptions) {
+        this.host = options.host;
+        this.target = options.element;
+    }
 
-    // Create container div for Plotly chart
-    let chartDiv = document.createElement("div");
-    chartDiv.style.width = "100%";
-    chartDiv.style.height = "100%";
-    this.target.appendChild(chartDiv);
+    public update(options: powerbiVisualsApi.extensibility.visual.VisualUpdateOptions) {
+        this.renderChart(options.viewport);
+    }
 
-    // Generate random data
-    const xValues = Array.from({ length: 10 }, (_, i) => i);
-    const yValues = Array.from({ length: 10 }, () => Math.floor(Math.random() * 100));
+    private renderChart(viewport: IViewport): void {
+        const data = [{
+            x: Array.from({length: 10}, (_, i) => i + 1),
+            y: Array.from({length: 10}, () => Math.random()),
+            type: 'scatter',
+            mode: 'lines+markers',
+            marker: {color: 'blue'}
+        }];
 
-    // Define a trace for a line chart (scatter with lines)
-    const trace = {
-      x: xValues,
-      y: yValues,
-      mode: 'lines',
-      type: 'scatter'
-    };
+        const layout = {
+            title: 'Random Data Line Chart',
+            autosize: true,
+            width: viewport.width,
+            height: viewport.height,
+            margin: { t: 30, b: 40, l: 40, r: 30 }
+        };
 
-    const data = [trace];
-
-    // Define layout settings
-    const layout = {
-      title: 'Random Data Line Chart',
-      margin: { t: 50, r: 20, b: 50, l: 50 }
-    };
-
-    // Render the chart using Plotly
-    Plotly.newPlot(chartDiv, data, layout);
-  }
+        Plotly.newPlot(this.target, data, layout, {responsive: true});
+    }
 }
