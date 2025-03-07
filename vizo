@@ -30,50 +30,51 @@ export class Visual implements IVisual {
         this.target = options.element;
 
         // Build overall HTML structure.
-        // - A header with white background and a blue title.
-        // - A main area with two pages (Page 1 and Page 2) sharing the same sidebar inputs.
-        // - A persistent footer with Bootstrap-styled navigation buttons.
+        // - The main container now uses Arial as the font.
+        // - Header with white background and header text in #1E8C98.
+        // - Sidebar background is set to #1E8C98.
+        // - Footer with persistent Bootstrap navigation buttons and no background.
         this.target.innerHTML = `
-            <div id="pagesContainer" style="height: 100%; display: flex; flex-direction: column;">
-                <!-- Header with white background and blue title -->
+            <div id="pagesContainer" style="height: 100%; display: flex; flex-direction: column; font-family: Arial;">
+                <!-- Header with white background and blue title (#1E8C98) -->
                 <div style="padding: 10px; text-align: center; background: white;">
-                    <h1 style="color: blue; margin: 0;">Debt-to-GDP Simulation Dashboard</h1>
+                    <h1 style="color: #1E8C98; margin: 0;">Debt-to-GDP Simulation Dashboard</h1>
                 </div>
                 <!-- Pages container -->
                 <div id="pagesContent" style="flex: 1; display: flex; flex-direction: column;">
                     <!-- Page 1 -->
                     <div id="page1" style="flex: 1; display: block;">
                         <div style="display: flex; height: 100%;">
-                            <!-- Sidebar for Page 1 -->
-                            <div style="width: 220px; background-color: #f0f0f0; padding: 10px; border-right: 1px solid #ccc;">
+                            <!-- Sidebar for Page 1 (background #1E8C98) -->
+                            <div style="width: 220px; background-color: #1E8C98; padding: 10px; border-right: 1px solid #ccc;">
                                 <div style="margin-bottom: 15px;">
-                                    <label>Geo</label><br>
+                                    <label style="color: white;">Geo</label><br>
                                     <select id="geoDropdown" style="width: 100%;"></select>
                                 </div>
                                 <div style="margin-bottom: 10px;">
-                                    <label>10-Year Bond Yield (%)</label><br>
+                                    <label style="color: white;">10-Year Bond Yield (%)</label><br>
                                     <input type="range" id="bondYield" min="-0.1" max="5" step="0.1" value="2">
-                                    <span id="bondYieldVal">2</span>
+                                    <span id="bondYieldVal" style="color: white;">2</span>
                                 </div>
                                 <div style="margin-bottom: 10px;">
-                                    <label>Spread vs Bund (bp)</label><br>
+                                    <label style="color: white;">Spread vs Bund (bp)</label><br>
                                     <input type="range" id="spread" min="0" max="300" step="10" value="50">
-                                    <span id="spreadVal">50</span>
+                                    <span id="spreadVal" style="color: white;">50</span>
                                 </div>
                                 <div style="margin-bottom: 10px;">
-                                    <label>Inflation (YoY %)</label><br>
+                                    <label style="color: white;">Inflation (YoY %)</label><br>
                                     <input type="range" id="inflation" min="0" max="10" step="0.1" value="2">
-                                    <span id="inflationVal">2</span>
+                                    <span id="inflationVal" style="color: white;">2</span>
                                 </div>
                                 <div style="margin-bottom: 10px;">
-                                    <label>Real GDP Growth (YoY %)</label><br>
+                                    <label style="color: white;">Real GDP Growth (YoY %)</label><br>
                                     <input type="range" id="realGrowth" min="-5" max="10" step="0.1" value="2">
-                                    <span id="realGrowthVal">2</span>
+                                    <span id="realGrowthVal" style="color: white;">2</span>
                                 </div>
                                 <div style="margin-bottom: 10px;">
-                                    <label>Primary Surplus (% of GDP)</label><br>
+                                    <label style="color: white;">Primary Surplus (% of GDP)</label><br>
                                     <input type="range" id="primarySurplus" min="-5" max="5" step="0.1" value="0">
-                                    <span id="primarySurplusVal">0</span>
+                                    <span id="primarySurplusVal" style="color: white;">0</span>
                                 </div>
                             </div>
                             <!-- Main content area for Page 1 -->
@@ -94,36 +95,36 @@ export class Visual implements IVisual {
                     <!-- Page 2 -->
                     <div id="page2" style="flex: 1; display: none;">
                         <div style="display: flex; height: 100%;">
-                            <!-- Sidebar for Page 2 -->
-                            <div style="width: 220px; background-color: #f0f0f0; padding: 10px; border-right: 1px solid #ccc;">
+                            <!-- Sidebar for Page 2 (background #1E8C98) -->
+                            <div style="width: 220px; background-color: #1E8C98; padding: 10px; border-right: 1px solid #ccc;">
                                 <div style="margin-bottom: 15px;">
-                                    <label>Geo</label><br>
+                                    <label style="color: white;">Geo</label><br>
                                     <select id="geoDropdownPage2" style="width: 100%;"></select>
                                 </div>
                                 <div style="margin-bottom: 10px;">
-                                    <label>10-Year Bond Yield (%)</label><br>
+                                    <label style="color: white;">10-Year Bond Yield (%)</label><br>
                                     <input type="range" id="bondYieldPage2" min="-0.1" max="5" step="0.1" value="2">
-                                    <span id="bondYieldValPage2">2</span>
+                                    <span id="bondYieldValPage2" style="color: white;">2</span>
                                 </div>
                                 <div style="margin-bottom: 10px;">
-                                    <label>Spread vs Bund (bp)</label><br>
+                                    <label style="color: white;">Spread vs Bund (bp)</label><br>
                                     <input type="range" id="spreadPage2" min="0" max="300" step="10" value="50">
-                                    <span id="spreadValPage2">50</span>
+                                    <span id="spreadValPage2" style="color: white;">50</span>
                                 </div>
                                 <div style="margin-bottom: 10px;">
-                                    <label>Inflation (YoY %)</label><br>
+                                    <label style="color: white;">Inflation (YoY %)</label><br>
                                     <input type="range" id="inflationPage2" min="0" max="10" step="0.1" value="2">
-                                    <span id="inflationValPage2">2</span>
+                                    <span id="inflationValPage2" style="color: white;">2</span>
                                 </div>
                                 <div style="margin-bottom: 10px;">
-                                    <label>Real GDP Growth (YoY %)</label><br>
+                                    <label style="color: white;">Real GDP Growth (YoY %)</label><br>
                                     <input type="range" id="realGrowthPage2" min="-5" max="10" step="0.1" value="2">
-                                    <span id="realGrowthValPage2">2</span>
+                                    <span id="realGrowthValPage2" style="color: white;">2</span>
                                 </div>
                                 <div style="margin-bottom: 10px;">
-                                    <label>Primary Surplus (% of GDP)</label><br>
+                                    <label style="color: white;">Primary Surplus (% of GDP)</label><br>
                                     <input type="range" id="primarySurplusPage2" min="-5" max="5" step="0.1" value="0">
-                                    <span id="primarySurplusValPage2">0</span>
+                                    <span id="primarySurplusValPage2" style="color: white;">0</span>
                                 </div>
                             </div>
                             <!-- Main content area for Page 2 -->
@@ -142,8 +143,8 @@ export class Visual implements IVisual {
                         </div>
                     </div>
                 </div>
-                <!-- Footer with persistent page navigation buttons -->
-                <div id="pageNav" style="text-align: center; padding: 10px; background: #e8e8e8;">
+                <!-- Footer with persistent page navigation buttons (no background) -->
+                <div id="pageNav" style="text-align: center; padding: 10px;">
                     <button id="btnPage1" class="btn btn-primary" style="margin: 0 10px;">Page 1</button>
                     <button id="btnPage2" class="btn btn-primary" style="margin: 0 10px;">Page 2</button>
                 </div>
