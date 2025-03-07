@@ -1,10 +1,4 @@
-"externalJS": [
-  "node_modules/plotly.js-dist-min/plotly.min.js"
-]
-
-
-
-import "plotly.js-dist-min"; // Ensure TypeScript knows about Plotly
+import * as Plotly from 'plotly.js-dist';
 
 export class Visual implements IVisual {
   private target: HTMLElement;
