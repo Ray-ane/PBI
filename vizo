@@ -1,0 +1,51 @@
+"externalJS": [
+  "node_modules/plotly.js-dist-min/plotly.min.js"
+]
+
+
+
+import "plotly.js-dist-min"; // Ensure TypeScript knows about Plotly
+
+export class Visual implements IVisual {
+  private target: HTMLElement;
+
+  constructor(options: VisualConstructorOptions) {
+    this.target = options.element;
+    // Clear any existing content
+    this.target.innerHTML = "";
+  }
+
+  public update(options: VisualUpdateOptions) {
+    // Clear previous rendering
+    this.target.innerHTML = "";
+
+    // Create container div for Plotly chart
+    let chartDiv = document.createElement("div");
+    chartDiv.style.width = "100%";
+    chartDiv.style.height = "100%";
+    this.target.appendChild(chartDiv);
+
+    // Generate random data
+    const xValues = Array.from({ length: 10 }, (_, i) => i);
+    const yValues = Array.from({ length: 10 }, () => Math.floor(Math.random() * 100));
+
+    // Define a trace for a line chart (scatter with lines)
+    const trace = {
+      x: xValues,
+      y: yValues,
+      mode: 'lines',
+      type: 'scatter'
+    };
+
+    const data = [trace];
+
+    // Define layout settings
+    const layout = {
+      title: 'Random Data Line Chart',
+      margin: { t: 50, r: 20, b: 50, l: 50 }
+    };
+
+    // Render the chart using Plotly
+    Plotly.newPlot(chartDiv, data, layout);
+  }
+}
