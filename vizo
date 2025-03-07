@@ -29,18 +29,23 @@ export class Visual implements IVisual {
     constructor(options: VisualConstructorOptions) {
         this.target = options.element;
 
-        // Build HTML structure:
-        // 1. Dropdown for Geo selection
-        // 2. Sliders for parameters
-        // 3. Chart area for D3
+        // Build overall HTML structure:
+        // 1. Overall page title
+        // 2. Left sidebar (Geo dropdown & sliders) with background color changed
+        // 3. Main content area split into center-left and center-right chart containers.
         this.target.innerHTML = `
             <div style="display: flex; flex-direction: column; height: 100%;">
-                <div style="padding: 5px;">
-                    <label>Geo</label><br>
-                    <select id="geoDropdown"></select>
+                <!-- Overall page title -->
+                <div style="padding: 10px; text-align: center;">
+                    <h1>Debt-to-GDP Simulation Dashboard</h1>
                 </div>
-                <div style="display: flex; flex: 1 1 auto; border-top: 1px solid #ccc; padding: 10px;">
-                    <div style="width: 200px; padding-right: 10px; border-right: 1px solid #ccc;">
+                <div style="display: flex; flex: 1 1 auto; border-top: 1px solid #ccc;">
+                    <!-- Sidebar with dropdown & sliders -->
+                    <div style="width: 220px; background-color: #f0f0f0; padding: 10px; border-right: 1px solid #ccc;">
+                        <div style="margin-bottom: 15px;">
+                            <label>Geo</label><br>
+                            <select id="geoDropdown" style="width: 100%;"></select>
+                        </div>
                         <div style="margin-bottom: 10px;">
                             <label>10-Year Bond Yield (%)</label><br>
                             <input type="range" id="bondYield" min="-0.1" max="5" step="0.1" value="2">
@@ -67,8 +72,18 @@ export class Visual implements IVisual {
                             <span id="primarySurplusVal">0</span>
                         </div>
                     </div>
-                    <div style="flex-grow: 1; padding: 10px;">
-                        <div id="d3Chart" style="width: 100%; height: 100%; position: relative;"></div>
+                    <!-- Main content area: two chart containers -->
+                    <div style="flex: 1; display: flex; flex-direction: row; padding: 10px;">
+                        <!-- Center left: Line chart container -->
+                        <div style="flex: 1; margin-right: 10px; border: 1px solid #ccc; padding: 10px; position: relative;">
+                            <h3 style="text-align: center; margin: 0 0 10px 0;">Historical & Simulated Debt-to-GDP</h3>
+                            <div id="d3ChartLeft" style="width: 100%; height: calc(100% - 40px);"></div>
+                        </div>
+                        <!-- Center right: Placeholder for another chart -->
+                        <div style="flex: 1; margin-left: 10px; border: 1px solid #ccc; padding: 10px; position: relative;">
+                            <h3 style="text-align: center; margin: 0 0 10px 0;">[Future Chart Placeholder]</h3>
+                            <div id="d3ChartRight" style="width: 100%; height: calc(100% - 40px);"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -184,7 +199,7 @@ export class Visual implements IVisual {
     }
 
     // Simulation using the structural equation:
-    // D_{t+1}/Y_{t+1} = ( [1 + (Y₁₀,t + Spread/10000)] / [(1 + π_t) (1 + g_real,t)] ) * (D_t/Y_t) - PS_t
+    // Dₜ₊₁/Yₜ₊₁ = ( [1 + (Y₁₀,t + Spread/10000)] / [(1 + π_t) (1 + g_real,t)] ) * (Dₜ/Yₜ) - PS_t
     private simulateDebtGDP(lastHistRatio: number): { year: number, ratio: number }[] {
         const result: { year: number, ratio: number }[] = [];
         let currentRatio = lastHistRatio;
@@ -205,9 +220,11 @@ export class Visual implements IVisual {
         return result;
     }
 
-    // Render a simple line chart with D3.js, a grey shaded area for simulation, and a tooltip
+    // Render a line chart with D3.js including:
+    // - A grey shaded area from 2023 onward for simulation
+    // - A tooltip that shows historical vs simulated info and the difference from 2023's value.
     private renderLineChart(data: { year: number, ratio: number }[], historical: { year: number, ratio: number }[]): void {
-        const chartDiv = d3.select("#d3Chart");
+        const chartDiv = d3.select("#d3ChartLeft");
         chartDiv.selectAll("*").remove();
 
         const margin = { top: 20, right: 20, bottom: 30, left: 50 };
@@ -252,7 +269,7 @@ export class Visual implements IVisual {
         g.append("g")
             .call(yAxis);
 
-        // Draw the line (simple continuous line)
+        // Draw the continuous line
         const line = d3.line<{ year: number, ratio: number }>()
             .x(d => x(d.year))
             .y(d => y(d.ratio));
@@ -263,7 +280,7 @@ export class Visual implements IVisual {
             .attr("stroke-width", 2)
             .attr("d", line);
 
-        // Create a tooltip div
+        // Create tooltip
         const tooltip = chartDiv.append("div")
             .attr("class", "tooltip")
             .style("position", "absolute")
@@ -273,10 +290,10 @@ export class Visual implements IVisual {
             .style("pointer-events", "none")
             .style("display", "none");
 
-        // Determine the last historical ratio for reference (from historical data)
+        // Last historical ratio for reference (2023 value)
         const lastHistorical = historical[historical.length - 1].ratio;
 
-        // Append an invisible overlay to capture mouse events for tooltip
+        // Overlay to capture mouse events
         g.append("rect")
             .attr("width", innerWidth)
             .attr("height", innerHeight)
@@ -285,7 +302,7 @@ export class Visual implements IVisual {
             .on("mousemove", function(event) {
                 const [mx, my] = d3.pointer(event);
                 const x0 = x.invert(mx);
-                const bisect = d3.bisector((d: {year: number, ratio: number}) => d.year).left;
+                const bisect = d3.bisector((d: { year: number, ratio: number }) => d.year).left;
                 const idx = bisect(data, x0);
                 const d0 = data[idx - 1];
                 const d1 = data[idx];
@@ -293,7 +310,6 @@ export class Visual implements IVisual {
                 if (d1 && (x0 - d0.year > d1.year - x0)) {
                     dNearest = d1;
                 }
-                // Set tooltip content based on whether the point is historical or simulated
                 if (dNearest.year > simulationStartYear) {
                     const diff = dNearest.ratio - lastHistorical;
                     tooltip.html(`Year: ${dNearest.year}<br>Simulated: ${dNearest.ratio.toFixed(2)}%<br>Diff from 2023: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}%`);
