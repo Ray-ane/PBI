@@ -7,57 +7,77 @@ module powerbi.extensibility.visual {
 
     export class Visual implements IVisual {
         private target: HTMLElement;
-        private dataView: DataView;
+        private dataView: DataView | undefined;
 
-        // Slider state: store user input in "percentage form" (2 means 2%).
+        // We will store all data in a structure keyed by Geo:
+        //   allData[geo] = Array of { year: number, ratio: number }
+        private allData: { [geo: string]: { year: number; ratio: number }[] } = {};
+
+        // A list of available geos (populated after parsing data).
+        private geos: string[] = [];
+
+        // Which geo is currently selected in the dropdown?
+        private selectedGeo: string | undefined;
+
+        // Slider states (in "user-friendly" % or bp)
         private sliderValues = {
-            bondYield: 2,         // 2 means 2%
-            spread: 50,           // 50 means 50 bp
-            inflation: 2,         // 2 means 2%
-            realGrowth: 2,        // 2 means 2%
-            primarySurplus: 0     // 0 means 0%
+            bondYield: 2,       // 2% for the 10-year bond yield
+            spread: 50,         // 50 bp for the spread vs Bund
+            inflation: 2,       // 2% inflation
+            realGrowth: 2,      // 2% real GDP growth
+            primarySurplus: 0   // 0% primary surplus
         };
 
         constructor(options: VisualConstructorOptions) {
             this.target = options.element;
 
-            // Build HTML: a sidebar for sliders and a main area for Plotly.
+            // Build the basic HTML:
+            // 1) A dropdown for Geo selection
+            // 2) Sliders for the five parameters
+            // 3) A div for the D3 chart
             this.target.innerHTML = `
-                <div style="display:flex; height:100%;">
-                    <div style="width:200px; padding:10px; border-right:1px solid #ccc;">
-                        <div style="margin-bottom:10px;">
-                            <label>10-Year Bond Yield (%)</label><br>
-                            <input type="range" id="bondYield" min="-0.1" max="5" step="0.1" value="2">
-                            <span id="bondYieldVal">2</span>
-                        </div>
-                        <div style="margin-bottom:10px;">
-                            <label>Spread vs Bund (bp)</label><br>
-                            <input type="range" id="spread" min="0" max="300" step="10" value="50">
-                            <span id="spreadVal">50</span>
-                        </div>
-                        <div style="margin-bottom:10px;">
-                            <label>Inflation (YoY %)</label><br>
-                            <input type="range" id="inflation" min="0" max="10" step="0.1" value="2">
-                            <span id="inflationVal">2</span>
-                        </div>
-                        <div style="margin-bottom:10px;">
-                            <label>Real GDP Growth (YoY %)</label><br>
-                            <input type="range" id="realGrowth" min="-5" max="10" step="0.1" value="2">
-                            <span id="realGrowthVal">2</span>
-                        </div>
-                        <div style="margin-bottom:10px;">
-                            <label>Primary Surplus (% of GDP)</label><br>
-                            <input type="range" id="primarySurplus" min="-5" max="5" step="0.1" value="0">
-                            <span id="primarySurplusVal">0</span>
-                        </div>
+                <div style="display:flex; flex-direction:column; height:100%;">
+                    <div style="padding:5px;">
+                        <label>Geo</label><br>
+                        <select id="geoDropdown"></select>
                     </div>
-                    <div style="flex-grow:1; padding:10px;">
-                        <div id="plotDiv" style="width:100%; height:100%;"></div>
+                    <div style="display:flex; border-top:1px solid #ccc; padding:10px;">
+                        <div style="width:200px; padding-right:10px; border-right:1px solid #ccc;">
+                            <div style="margin-bottom:10px;">
+                                <label>10-Year Bond Yield (%)</label><br>
+                                <input type="range" id="bondYield" min="-0.1" max="5" step="0.1" value="2">
+                                <span id="bondYieldVal">2</span>
+                            </div>
+                            <div style="margin-bottom:10px;">
+                                <label>Spread vs Bund (bp)</label><br>
+                                <input type="range" id="spread" min="0" max="300" step="10" value="50">
+                                <span id="spreadVal">50</span>
+                            </div>
+                            <div style="margin-bottom:10px;">
+                                <label>Inflation (YoY %)</label><br>
+                                <input type="range" id="inflation" min="0" max="10" step="0.1" value="2">
+                                <span id="inflationVal">2</span>
+                            </div>
+                            <div style="margin-bottom:10px;">
+                                <label>Real GDP Growth (YoY %)</label><br>
+                                <input type="range" id="realGrowth" min="-5" max="10" step="0.1" value="2">
+                                <span id="realGrowthVal">2</span>
+                            </div>
+                            <div style="margin-bottom:10px;">
+                                <label>Primary Surplus (% of GDP)</label><br>
+                                <input type="range" id="primarySurplus" min="-5" max="5" step="0.1" value="0">
+                                <span id="primarySurplusVal">0</span>
+                            </div>
+                        </div>
+                        <div style="flex-grow:1; padding:10px;">
+                            <!-- D3 chart container -->
+                            <div id="d3Chart" style="width:100%; height:100%; position:relative;"></div>
+                        </div>
                     </div>
                 </div>
             `;
 
-            // Wire up slider events
+            // Attach slider event listeners
             const self = this;
             (document.getElementById("bondYield") as HTMLInputElement).addEventListener("input", function() {
                 self.sliderValues.bondYield = parseFloat(this.value);
@@ -84,108 +104,204 @@ module powerbi.extensibility.visual {
                 document.getElementById("primarySurplusVal")!.textContent = this.value;
                 self.updateChart();
             });
+
+            // Attach event listener for the dropdown
+            const dropdown = document.getElementById("geoDropdown") as HTMLSelectElement;
+            dropdown.addEventListener("change", function() {
+                self.selectedGeo = this.value;
+                self.updateChart();
+            });
         }
 
-        // Called whenever the visual is updated (resize, data change, etc.)
-        public update(options: VisualUpdateOptions) {
+        public update(options: VisualUpdateOptions): void {
             if (options.dataViews && options.dataViews[0]) {
                 this.dataView = options.dataViews[0];
             }
+            // Parse data from the DataView and populate the dropdown if needed
+            this.parseData();
+            this.populateDropdown();
             this.updateChart();
         }
 
-        // Gathers historical data, runs simulation, and plots with Plotly.
-        private updateChart(): void {
-            // 1) Get historical data from DataView
-            const historicalData = this.getHistoricalData();
-            if (!historicalData.length) {
-                return;
-            }
+        // Parse the entire table for all geos, store in allData[geo]
+        private parseData(): void {
+            this.allData = {};
+            this.geos = [];
 
-            // 2) Last known historical ratio
-            const lastHistoricalDebtRatio = historicalData[historicalData.length - 1].value;
-
-            // 3) Simulate future (2024–2050) using the structural equation
-            const simulationData = this.simulateDebtGDP(lastHistoricalDebtRatio);
-
-            // 4) Combine historical + simulation
-            const allYears = historicalData.map(d => d.year).concat(simulationData.map(d => d.year));
-            const allValues = historicalData.map(d => d.value).concat(simulationData.map(d => d.value));
-
-            // 5) Plotly trace
-            const trace = {
-                x: allYears,
-                y: allValues,
-                mode: 'lines+markers',
-                type: 'scatter',
-                name: 'Debt-to-GDP (%)'
-            };
-
-            // 6) Plotly layout
-            const layout: Partial<Plotly.Layout> = {
-                title: 'Debt-to-GDP Ratio Simulation',
-                xaxis: { title: 'Year' },
-                yaxis: { title: 'Debt-to-GDP (%)' }
-            };
-
-            // 7) Render
-            Plotly.newPlot('plotDiv', [trace], layout);
-        }
-
-        // Reads (Geo, Year, GrossDebt, Nominal-GDP) from the DataView table, 
-        // filters years <= 2023, and computes Debt/GDP * 100.
-        private getHistoricalData(): { year: number; value: number }[] {
-            const data: { year: number; value: number }[] = [];
             if (!this.dataView || !this.dataView.table) {
-                return data;
+                return;
             }
 
             const table = this.dataView.table;
             for (let i = 0; i < table.rows.length; i++) {
                 const row = table.rows[i];
-                const year = +row[1];        // 2nd column = Year
-                const grossDebt = +row[2];   // 3rd column = GrossDebt
-                const nominalGDP = +row[3];  // 4th column = Nominal-GDP
-                if (year <= 2023) {
-                    // Convert to percentage
+                const geo = String(row[0]);       // 1st column = Geo
+                const year = +row[1];            // 2nd column = Year
+                const grossDebt = +row[2];       // 3rd column = GrossDebt
+                const nominalGDP = +row[3];      // 4th column = Nominal-GDP
+
+                // Compute ratio in percent
+                if (nominalGDP > 0) {
                     const ratio = (grossDebt / nominalGDP) * 100;
-                    data.push({ year: year, value: ratio });
+                    if (!this.allData[geo]) {
+                        this.allData[geo] = [];
+                    }
+                    this.allData[geo].push({ year, ratio });
                 }
             }
 
-            // Sort by year just in case
-            data.sort((a, b) => a.year - b.year);
-            return data;
+            // Sort each geo's data by year
+            for (const g of Object.keys(this.allData)) {
+                this.allData[g].sort((a, b) => a.year - b.year);
+            }
+
+            // Collect unique geos
+            this.geos = Object.keys(this.allData);
         }
 
-        // Uses the exact structural equation:
-        //   D_{t+1}/Y_{t+1} = ( [1 + (Y_{10,t} + Spread_t/10000)] / [(1 + pi_t)*(1 + g_real,t)] ) * (D_t/Y_t ) - PS_t
-        // Here, slider values (bondYield, inflation, etc.) are in "user-friendly %", so convert to decimals.
-        private simulateDebtGDP(lastHistoricalDebtRatio: number): { year: number; value: number }[] {
-            const simulation: { year: number; value: number }[] = [];
-            let currentDebtRatio = lastHistoricalDebtRatio;
+        // Populate the geo dropdown with the list of geos
+        private populateDropdown(): void {
+            const dropdown = document.getElementById("geoDropdown") as HTMLSelectElement;
+            // Clear existing options
+            dropdown.innerHTML = "";
 
-            // Convert user "2" to decimal "0.02"
-            const bondYieldDecimal = this.sliderValues.bondYield / 100; 
-            const spreadDecimal = this.sliderValues.spread / 10000;     // 50 => 0.005
-            const inflationDecimal = this.sliderValues.inflation / 100; // 2 => 0.02
-            const realGrowthDecimal = this.sliderValues.realGrowth / 100;
-            const psDecimal = this.sliderValues.primarySurplus / 100;
-
-            // Simulate from 2024 to 2050
-            for (let year = 2024; year <= 2050; year++) {
-                // Numerator: 1 + ( Y_{10,t} + Spread_t/10000 )
-                const numerator = 1 + (bondYieldDecimal + spreadDecimal);
-                // Denominator: (1 + pi_t)*(1 + g_real,t)
-                const denominator = (1 + inflationDecimal) * (1 + realGrowthDecimal);
-
-                // Apply the equation
-                currentDebtRatio = (numerator / denominator) * currentDebtRatio - psDecimal;
-
-                // Store
-                simulation.push({ year: year, value: currentDebtRatio });
+            // Add an option for each geo
+            for (const g of this.geos) {
+                const opt = document.createElement("option");
+                opt.value = g;
+                opt.text = g;
+                dropdown.appendChild(opt);
             }
-            return simulation;
+
+            // If no selection or current selection not in list, pick the first
+            if (!this.selectedGeo || !this.geos.includes(this.selectedGeo)) {
+                this.selectedGeo = this.geos.length > 0 ? this.geos[0] : undefined;
+                dropdown.value = this.selectedGeo || "";
+            } else {
+                // Otherwise keep the current selection
+                dropdown.value = this.selectedGeo;
+            }
+        }
+
+        // Main method: gets the data for the selected geo, runs simulation, renders with D3
+        private updateChart(): void {
+            if (!this.selectedGeo || !this.allData[this.selectedGeo]) {
+                return;
+            }
+
+            // 1) Filter historical data up to 2023
+            const historical = this.allData[this.selectedGeo].filter(d => d.year <= 2023);
+
+            if (!historical.length) {
+                return;
+            }
+
+            // 2) Last known historical ratio
+            const lastHistRatio = historical[historical.length - 1].ratio;
+
+            // 3) Simulate from 2024 to 2050
+            const simulated = this.simulateDebtGDP(lastHistRatio);
+
+            // 4) Combine
+            // We'll store everything in the same structure { year, ratio }
+            const combined = [...historical.map(d => ({ year: d.year, ratio: d.ratio })), ...simulated];
+
+            // 5) Render using D3
+            this.renderLineChart(combined);
+        }
+
+        // EXACT structural equation:
+        // D_{t+1}/Y_{t+1} = ( [1 + (Y_{10,t} + Spread/10000)] / [(1 + pi_t)*(1 + g_real,t)] ) * (D_t/Y_t) - PS_t
+        private simulateDebtGDP(lastHistRatio: number): {year: number, ratio: number}[] {
+            const result: {year: number, ratio: number}[] = [];
+            let currentRatio = lastHistRatio;
+
+            // Convert user slider inputs to decimals
+            const i_bond = this.sliderValues.bondYield / 100;      // e.g. 2 => 0.02
+            const i_spread = this.sliderValues.spread / 10000;     // e.g. 50 => 0.005
+            const i_inflation = this.sliderValues.inflation / 100; // e.g. 2 => 0.02
+            const i_real = this.sliderValues.realGrowth / 100;
+            const i_PS = this.sliderValues.primarySurplus / 100;
+
+            for (let year = 2024; year <= 2050; year++) {
+                const numerator = 1 + (i_bond + i_spread);
+                const denominator = (1 + i_inflation) * (1 + i_real);
+
+                currentRatio = (numerator / denominator) * currentRatio - i_PS;
+                result.push({ year, ratio: currentRatio });
+            }
+            return result;
+        }
+
+        // Renders a simple line chart with D3.js
+        private renderLineChart(data: {year: number, ratio: number}[]): void {
+            // 1) Clear existing chart
+            const chartDiv = d3.select("#d3Chart");
+            chartDiv.selectAll("*").remove();
+
+            // 2) Dimensions
+            const margin = { top: 20, right: 20, bottom: 30, left: 50 };
+            const width = chartDiv.node()?.clientWidth || 400;
+            const height = chartDiv.node()?.clientHeight || 300;
+            const innerWidth = width - margin.left - margin.right;
+            const innerHeight = height - margin.top - margin.bottom;
+
+            // 3) Create SVG
+            const svg = chartDiv
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height);
+
+            const g = svg.append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            // 4) Scales
+            const x = d3.scaleLinear<number, number>()
+                .domain(d3.extent(data, d => d.year) as [number, number])
+                .range([0, innerWidth]);
+
+            const y = d3.scaleLinear<number, number>()
+                .domain([
+                    d3.min(data, d => d.ratio) ?? 0,
+                    d3.max(data, d => d.ratio) ?? 100
+                ])
+                .nice()
+                .range([innerHeight, 0]);
+
+            // 5) Axes
+            const xAxis = d3.axisBottom<number>(x).tickFormat(d3.format("d")); // integer year
+            const yAxis = d3.axisLeft<number>(y);
+
+            g.append("g")
+                .attr("transform", `translate(0,${innerHeight})`)
+                .call(xAxis);
+
+            g.append("g")
+                .call(yAxis);
+
+            // 6) Line generator
+            const line = d3.line<{year: number, ratio: number}>()
+                .x(d => x(d.year))
+                .y(d => y(d.ratio));
+
+            // 7) Draw line
+            g.append("path")
+                .datum(data)
+                .attr("fill", "none")
+                .attr("stroke", "steelblue")
+                .attr("stroke-width", 2)
+                .attr("d", line);
+
+            // 8) Optional points
+            g.selectAll(".dot")
+                .data(data)
+                .enter()
+                .append("circle")
+                .attr("class", "dot")
+                .attr("cx", d => x(d.year))
+                .attr("cy", d => y(d.ratio))
+                .attr("r", 3)
+                .attr("fill", "steelblue");
         }
     }
 }
