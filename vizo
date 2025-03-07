@@ -30,14 +30,13 @@ export class Visual implements IVisual {
         this.target = options.element;
 
         // Build overall HTML structure.
-        // - A header with a blue title.
-        // - A main area that contains two pages (Page 1 and Page 2).
-        //   Both pages share a similar sidebar with the same inputs.
-        // - At the bottom, a footer with navigation buttons that always remain visible.
+        // - A header with white background and a blue title.
+        // - A main area with two pages (Page 1 and Page 2) sharing the same sidebar inputs.
+        // - A persistent footer with Bootstrap-styled navigation buttons.
         this.target.innerHTML = `
             <div id="pagesContainer" style="height: 100%; display: flex; flex-direction: column;">
-                <!-- Header with blue title -->
-                <div style="padding: 10px; text-align: center; background: #e8e8e8;">
+                <!-- Header with white background and blue title -->
+                <div style="padding: 10px; text-align: center; background: white;">
                     <h1 style="color: blue; margin: 0;">Debt-to-GDP Simulation Dashboard</h1>
                 </div>
                 <!-- Pages container -->
@@ -145,8 +144,8 @@ export class Visual implements IVisual {
                 </div>
                 <!-- Footer with persistent page navigation buttons -->
                 <div id="pageNav" style="text-align: center; padding: 10px; background: #e8e8e8;">
-                    <button id="btnPage1" style="margin: 0 10px;">Page 1</button>
-                    <button id="btnPage2" style="margin: 0 10px;">Page 2</button>
+                    <button id="btnPage1" class="btn btn-primary" style="margin: 0 10px;">Page 1</button>
+                    <button id="btnPage2" class="btn btn-primary" style="margin: 0 10px;">Page 2</button>
                 </div>
             </div>
         `;
@@ -240,7 +239,7 @@ export class Visual implements IVisual {
         this.renderPage2Chart();
     }
 
-    // Parse DataView rows: [Geo, Year, GrossDebt, NominalGDP]
+    // Parse DataView table rows: [Geo, Year, GrossDebt, NominalGDP]
     private parseData(): void {
         this.allData = {};
         this.geos = [];
@@ -330,7 +329,7 @@ export class Visual implements IVisual {
         return result;
     }
 
-    // Render the Page 1 line chart (with grey simulation area and tooltip).
+    // Render the Page 1 line chart with grey simulation area and tooltip.
     private renderLineChart(data: { year: number, ratio: number }[], historical: { year: number, ratio: number }[]): void {
         const chartDiv = d3.select("#d3ChartLeft");
         chartDiv.selectAll("*").remove();
