@@ -11,36 +11,33 @@ import DataView = powerbiVisualsApi.DataView;
 export class Visual implements IVisual {
   private target: HTMLElement;
   private dataView: DataView | undefined;
-
-  // Store historical data keyed by Geo.
   private allData: { [geo: string]: { year: number; ratio: number }[] } = {};
   private geos: string[] = [];
   private selectedGeo: string | undefined;
-
-  // Slider values (user enters percentages and bp; conversion happens later)
   private sliderValues = {
-    bondYield: 2, // 10-year Bond Yield (%)
-    spread: 50, // Spread vs Bund (bp)
-    inflation: 2, // Inflation (YoY %)
-    realGrowth: 2, // Real GDP Growth (YoY %)
-    primarySurplus: 0 // Primary Surplus (% of GDP)
+    bondYield: 2,       // 10-year Bond Yield (%)
+    spread: 50,         // Spread vs Bund (bp)
+    inflation: 2,       // Inflation (YoY %)
+    realGrowth: 2,      // Real GDP Growth (YoY %)
+    primarySurplus: 0   // Primary Surplus (% of GDP)
   };
 
   constructor(options: VisualConstructorOptions) {
     this.target = options.element;
 
-    // Build overall HTML structure.
-    // - A header with white background and blue title (#1E8C98).
-    // - A persistent full-height sidebar on the left (background: #1E8C98).
-    // - A pages container (with two pages) that has left margin to clear the sidebar.
-    // - A footer with persistent Bootstrap-styled navigation buttons (no background).
+    // Overall HTML structure:
+    // - A header with white background and header text in #1E8C98.
+    // - A persistent full-height global sidebar (background: #1E8C98) on the left.
+    // - A pages container shifted to the right (via left margin) so content isn't overlapped.
+    // - A footer with persistent navigation buttons using Bootstrap styling.
+    //   The footer is given a high z-index to remain clickable.
     this.target.innerHTML = `
       <div id="pagesContainer" style="height: 100%; display: flex; flex-direction: column; position: relative; font-family: Arial;">
         <!-- Header -->
         <div id="header" style="padding: 10px; text-align: center; background: white;">
           <h1 style="color: #1E8C98; margin: 0;">Debt-to-GDP Simulation Dashboard</h1>
         </div>
-        <!-- Main content: pages container with left margin -->
+        <!-- Pages container with left margin to accommodate sidebar -->
         <div id="pagesContent" style="flex: 1; margin-left: 220px; display: flex; flex-direction: column;">
           <!-- Page 1 -->
           <div id="page1" style="flex: 1; display: block;">
@@ -79,12 +76,12 @@ export class Visual implements IVisual {
             </div>
           </div>
         </div>
-        <!-- Footer with persistent navigation buttons (no background) -->
-        <div id="pageNav" style="text-align: center; padding: 10px;">
+        <!-- Footer with navigation buttons (no background, high z-index) -->
+        <div id="pageNav" style="text-align: center; padding: 10px; position: relative; z-index: 100;">
           <button id="btnPage1" class="btn btn-primary" style="margin: 0 10px;">Page 1</button>
           <button id="btnPage2" class="btn btn-primary" style="margin: 0 10px;">Page 2</button>
         </div>
-        <!-- Persistent Sidebar: full height, extended top to bottom -->
+        <!-- Global Sidebar: full height, extended top to bottom -->
         <div id="sidebar" style="position: absolute; top: 0; bottom: 0; left: 0; width: 220px; background-color: #1E8C98; padding: 10px; overflow-y: auto;">
           <div style="margin-bottom: 15px;">
             <label style="color: white;">Geo</label><br>
@@ -119,7 +116,7 @@ export class Visual implements IVisual {
       </div>
     `;
 
-    // --- Attach Global Sidebar Event Listeners ---
+    // Attach event listeners for global sidebar controls
     const self = this;
     (document.getElementById("bondYieldGlobal") as HTMLInputElement).addEventListener("input", function () {
       self.sliderValues.bondYield = parseFloat(this.value);
@@ -156,20 +153,26 @@ export class Visual implements IVisual {
       self.updateChart();
       self.renderPage2Chart();
     });
+
+    // Attach event listeners for footer page navigation buttons
+    (document.getElementById("btnPage1") as HTMLButtonElement).addEventListener("click", function () {
+      self.navigateToPage(1);
+    });
+    (document.getElementById("btnPage2") as HTMLButtonElement).addEventListener("click", function () {
+      self.navigateToPage(2);
+    });
   }
 
   public update(options: VisualUpdateOptions): void {
     if (options.dataViews && options.dataViews[0]) {
       this.dataView = options.dataViews[0];
     }
-    // Parse data and update both pages and global sidebar.
     this.parseData();
     this.populateDropdown();
     this.updateChart();
     this.renderPage2Chart();
   }
 
-  // Parse DataView table rows: [Geo, Year, GrossDebt, NominalGDP]
   private parseData(): void {
     this.allData = {};
     this.geos = [];
@@ -191,14 +194,12 @@ export class Visual implements IVisual {
         this.allData[geo].push({ year: year, ratio: ratio });
       }
     }
-    // Sort each geo's data by year.
     for (const g in this.allData) {
       this.allData[g].sort((a, b) => a.year - b.year);
     }
     this.geos = Object.keys(this.allData);
   }
 
-  // Populate the Geo dropdown in the global sidebar.
   private populateDropdown(): void {
     const dropdown = document.getElementById("geoDropdownGlobal") as HTMLSelectElement;
     dropdown.innerHTML = "";
@@ -216,7 +217,6 @@ export class Visual implements IVisual {
     }
   }
 
-  // Update the Page 1 simulation chart.
   private updateChart(): void {
     if (!this.selectedGeo || !this.allData[this.selectedGeo]) {
       return;
@@ -231,8 +231,6 @@ export class Visual implements IVisual {
     this.renderLineChart(combined, historical);
   }
 
-  // Simulation using the structural equation:
-  // Dₜ₊₁/Yₜ₊₁ = ([1 + (Y₁₀,t + Spread/10000)] / [(1 + π_t)(1 + g_real,t)])*(Dₜ/Yₜ) - PS_t
   private simulateDebtGDP(lastHistRatio: number): { year: number, ratio: number }[] {
     const result: { year: number, ratio: number }[] = [];
     let currentRatio = lastHistRatio;
@@ -250,7 +248,6 @@ export class Visual implements IVisual {
     return result;
   }
 
-  // Render the Page 1 line chart with grey simulation area and tooltip.
   private renderLineChart(data: { year: number, ratio: number }[], historical: { year: number, ratio: number }[]): void {
     const chartDiv = d3.select("#d3ChartLeft");
     chartDiv.selectAll("*").remove();
@@ -271,7 +268,6 @@ export class Visual implements IVisual {
       .domain([d3.min(data, d => d.ratio) ?? 0, d3.max(data, d => d.ratio) ?? 100])
       .nice()
       .range([innerHeight, 0]);
-    // Grey shaded area for simulation (from 2023 onward)
     const simulationStartYear = 2023;
     g.append("rect")
       .attr("x", x(simulationStartYear))
@@ -287,7 +283,6 @@ export class Visual implements IVisual {
       .call(xAxis);
     g.append("g")
       .call(yAxis);
-    // Draw continuous line chart
     const line = d3.line<{ year: number, ratio: number }>()
       .x(d => x(d.year))
       .y(d => y(d.ratio));
@@ -297,7 +292,6 @@ export class Visual implements IVisual {
       .attr("stroke", "steelblue")
       .attr("stroke-width", 2)
       .attr("d", line);
-    // Tooltip
     const tooltip = chartDiv.append("div")
       .attr("class", "tooltip")
       .style("position", "absolute")
@@ -338,7 +332,6 @@ export class Visual implements IVisual {
       });
   }
 
-  // Render a placeholder chart for Page 2.
   private renderPage2Chart(): void {
     const chartDiv = d3.select("#d3ChartPage2");
     chartDiv.selectAll("*").remove();
@@ -357,7 +350,6 @@ export class Visual implements IVisual {
       .text("Other Charts Placeholder");
   }
 
-  // Navigate between pages using the persistent footer buttons.
   private navigateToPage(pageNumber: number): void {
     const page1 = document.getElementById("page1");
     const page2 = document.getElementById("page2");
