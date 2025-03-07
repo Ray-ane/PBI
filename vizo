@@ -183,4 +183,129 @@ export class Visual implements IVisual {
         this.renderLineChart(combined, historical);
     }
 
-    // Simulation using the struct
+    // Simulation using the structural equation:
+    // D_{t+1}/Y_{t+1} = ( [1 + (Y₁₀,t + Spread/10000)] / [(1 + π_t) (1 + g_real,t)] ) * (D_t/Y_t) - PS_t
+    private simulateDebtGDP(lastHistRatio: number): { year: number, ratio: number }[] {
+        const result: { year: number, ratio: number }[] = [];
+        let currentRatio = lastHistRatio;
+
+        // Convert slider values: user "2" → 0.02, "50" bp → 0.005, etc.
+        const i_bond = this.sliderValues.bondYield / 100;
+        const i_spread = this.sliderValues.spread / 10000;
+        const i_inflation = this.sliderValues.inflation / 100;
+        const i_real = this.sliderValues.realGrowth / 100;
+        const i_PS = this.sliderValues.primarySurplus / 100;
+
+        for (let year = 2024; year <= 2050; year++) {
+            const numerator = 1 + (i_bond + i_spread);
+            const denominator = (1 + i_inflation) * (1 + i_real);
+            currentRatio = (numerator / denominator) * currentRatio - i_PS;
+            result.push({ year: year, ratio: currentRatio });
+        }
+        return result;
+    }
+
+    // Render a simple line chart with D3.js, a grey shaded area for simulation, and a tooltip
+    private renderLineChart(data: { year: number, ratio: number }[], historical: { year: number, ratio: number }[]): void {
+        const chartDiv = d3.select("#d3Chart");
+        chartDiv.selectAll("*").remove();
+
+        const margin = { top: 20, right: 20, bottom: 30, left: 50 };
+        const width = (chartDiv.node() as HTMLElement).clientWidth || 400;
+        const height = (chartDiv.node() as HTMLElement).clientHeight || 300;
+        const innerWidth = width - margin.left - margin.right;
+        const innerHeight = height - margin.top - margin.bottom;
+
+        const svg = chartDiv.append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        const g = svg.append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        // Define scales
+        const x = d3.scaleLinear()
+            .domain(d3.extent(data, d => d.year) as [number, number])
+            .range([0, innerWidth]);
+
+        const y = d3.scaleLinear()
+            .domain([d3.min(data, d => d.ratio) ?? 0, d3.max(data, d => d.ratio) ?? 100])
+            .nice()
+            .range([innerHeight, 0]);
+
+        // Add grey shaded area for simulation (from 2023 onward)
+        const simulationStartYear = 2023;
+        g.append("rect")
+            .attr("x", x(simulationStartYear))
+            .attr("y", 0)
+            .attr("width", innerWidth - x(simulationStartYear))
+            .attr("height", innerHeight)
+            .attr("fill", "#ccc")
+            .attr("opacity", 0.3);
+
+        // Draw axes
+        const xAxis = d3.axisBottom(x).tickFormat(d3.format("d"));
+        const yAxis = d3.axisLeft(y);
+        g.append("g")
+            .attr("transform", `translate(0,${innerHeight})`)
+            .call(xAxis);
+        g.append("g")
+            .call(yAxis);
+
+        // Draw the line (simple continuous line)
+        const line = d3.line<{ year: number, ratio: number }>()
+            .x(d => x(d.year))
+            .y(d => y(d.ratio));
+        g.append("path")
+            .datum(data)
+            .attr("fill", "none")
+            .attr("stroke", "steelblue")
+            .attr("stroke-width", 2)
+            .attr("d", line);
+
+        // Create a tooltip div
+        const tooltip = chartDiv.append("div")
+            .attr("class", "tooltip")
+            .style("position", "absolute")
+            .style("background", "#fff")
+            .style("border", "1px solid #ccc")
+            .style("padding", "5px")
+            .style("pointer-events", "none")
+            .style("display", "none");
+
+        // Determine the last historical ratio for reference (from historical data)
+        const lastHistorical = historical[historical.length - 1].ratio;
+
+        // Append an invisible overlay to capture mouse events for tooltip
+        g.append("rect")
+            .attr("width", innerWidth)
+            .attr("height", innerHeight)
+            .attr("fill", "none")
+            .attr("pointer-events", "all")
+            .on("mousemove", function(event) {
+                const [mx, my] = d3.pointer(event);
+                const x0 = x.invert(mx);
+                const bisect = d3.bisector((d: {year: number, ratio: number}) => d.year).left;
+                const idx = bisect(data, x0);
+                const d0 = data[idx - 1];
+                const d1 = data[idx];
+                let dNearest = d0;
+                if (d1 && (x0 - d0.year > d1.year - x0)) {
+                    dNearest = d1;
+                }
+                // Set tooltip content based on whether the point is historical or simulated
+                if (dNearest.year > simulationStartYear) {
+                    const diff = dNearest.ratio - lastHistorical;
+                    tooltip.html(`Year: ${dNearest.year}<br>Simulated: ${dNearest.ratio.toFixed(2)}%<br>Diff from 2023: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}%`);
+                } else {
+                    tooltip.html(`Year: ${dNearest.year}<br>Historical: ${dNearest.ratio.toFixed(2)}%`);
+                }
+                tooltip.style("display", "block")
+                    .style("left", (mx + margin.left + 10) + "px")
+                    .style("top", (my + margin.top - 20) + "px");
+            })
+            .on("mouseout", function() {
+                tooltip.style("display", "none");
+            });
+    }
+}
