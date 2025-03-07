@@ -1,3 +1,8 @@
+"externalJS": ["node_modules/plotly.js-dist-min/plotly.min.js"]
+
+
+
+
 import * as Plotly from 'plotly.js-dist';
 
 export class Visual implements IVisual {
