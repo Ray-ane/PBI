@@ -11,7 +11,7 @@ export class Visual implements IVisual {
     private target: HTMLElement;
     private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
 
-    // Sliders for lambda and sigma scaling factors.
+    // Sliders for λ and σ scaling factors.
     private lambdaSlider: d3.Selection<HTMLInputElement, unknown, null, undefined>;
     private sigmaSlider: d3.Selection<HTMLInputElement, unknown, null, undefined>;
 
@@ -140,6 +140,7 @@ export class Visual implements IVisual {
             denominator += Math.pow(rawData[i].y - xMean, 2);
         }
         let alphaHat = numerator / denominator;
+        // Bound alphaHat to avoid log(0) or negative lambda.
         alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
         this.lambdaHat = -Math.log(alphaHat) / this.delta;
 
@@ -180,7 +181,7 @@ export class Visual implements IVisual {
         // Clear previous SVG contents.
         this.svg.selectAll("*").remove();
 
-        // Use viewport dimensions if available; otherwise default.
+        // Use viewport dimensions if available; otherwise, default values.
         let width = options?.viewport.width || 300;
         let height = options?.viewport.height || 200;
         this.svg.attr("width", width).attr("height", height);
