@@ -15,7 +15,6 @@ export class Visual implements IVisual {
     private margin = { top: 20, right: 30, bottom: 50, left: 50 };
 
     // Stored data and estimated parameters.
-    // x is a Date; y is a number.
     private data: { x: Date, y: number }[] = [];
     private lambdaHat: number = 0;
     private muHat: number = 0;
@@ -31,12 +30,9 @@ export class Visual implements IVisual {
         this.target.innerHTML = "";
 
         // Create a container for HTML slider controls.
+        // Note: The slider styling is now handled by the visual.less file.
         const sliderContainer = document.createElement("div");
         sliderContainer.id = "slider-container";
-        sliderContainer.style.display = "flex";
-        sliderContainer.style.justifyContent = "space-around";
-        sliderContainer.style.alignItems = "center";
-        sliderContainer.style.marginBottom = "10px";
         sliderContainer.innerHTML = `
             <div>
                 <label for="lambdaSlider">Lambda Factor:</label>
@@ -94,7 +90,7 @@ export class Visual implements IVisual {
         const tableRows = dataView.table.rows;
         if (!tableRows || tableRows.length === 0) return;
 
-        // Parse data: assume first column is a date and second column is a measure.
+        // Parse data: first column is a date, second column is a measure.
         let rawData: { x: Date, y: number }[] = [];
         tableRows.forEach((row: any[]) => {
             const xVal = new Date(row[0]);
@@ -103,7 +99,7 @@ export class Visual implements IVisual {
                 rawData.push({ x: xVal, y: yVal });
             }
         });
-        // Sort data by date.
+        // Sort by date.
         rawData.sort((a, b) => a.x.getTime() - b.x.getTime());
         this.data = rawData;
         if (rawData.length < 2) return;
@@ -119,7 +115,7 @@ export class Visual implements IVisual {
         const yMean = d3.mean(rawData, d => d.y) as number;
         let numerator = 0, denominator = 0;
         for (let i = 0; i < n; i++) {
-            numerator += (rawData[i + 1].y - yMean) * (rawData[i].y - yMean);
+            numerator += (rawData[i+1].y - yMean) * (rawData[i].y - yMean);
             denominator += Math.pow(rawData[i].y - yMean, 2);
         }
         let alphaHat = numerator / denominator;
@@ -128,13 +124,13 @@ export class Visual implements IVisual {
 
         let sumResidual = 0;
         for (let i = 0; i < n; i++) {
-            sumResidual += rawData[i + 1].y - alphaHat * rawData[i].y;
+            sumResidual += rawData[i+1].y - alphaHat * rawData[i].y;
         }
         this.muHat = sumResidual / (n * (1 - alphaHat));
 
         let sumSq = 0;
         for (let i = 0; i < n; i++) {
-            const r = rawData[i + 1].y - alphaHat * rawData[i].y - (1 - alphaHat) * this.muHat;
+            const r = rawData[i+1].y - alphaHat * rawData[i].y - (1 - alphaHat) * this.muHat;
             sumSq += r * r;
         }
         const sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
@@ -184,7 +180,7 @@ export class Visual implements IVisual {
         const forecastLowerLine = forecastPoints.map(d => ({ x: d.x, y: d.lower }));
         const forecastUpperLine = forecastPoints.map(d => ({ x: d.x, y: d.upper }));
 
-        // Combine data for scales.
+        // Combine historical and forecast data for scales.
         const allX = this.data.map(d => d.x).concat(forecastMeanLine.map(d => d.x));
         const allY = this.data.map(d => d.y)
             .concat(forecastMeanLine.map(d => d.y))
@@ -199,7 +195,7 @@ export class Visual implements IVisual {
             .range([innerHeight, 0])
             .nice();
 
-        // Dynamically determine tick count.
+        // Dynamically determine tick count and rotate labels if necessary.
         const tickCount = Math.max(2, Math.floor(innerWidth / 80));
         const xAxis = d3.axisBottom(xScale)
             .ticks(tickCount)
@@ -207,7 +203,6 @@ export class Visual implements IVisual {
         const xAxisGroup = g.append("g")
             .attr("transform", `translate(0, ${innerHeight})`)
             .call(xAxis);
-        // Rotate tick labels if the width is small.
         if(innerWidth < 300) {
             xAxisGroup.selectAll("text")
                 .attr("transform", "rotate(-45)")
