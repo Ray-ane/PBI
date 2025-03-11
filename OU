@@ -1,320 +1,56 @@
-"use strict";
-import "./../style/visual.less";
-import * as d3 from "d3";
-import powerbiVisualsApi from "powerbi-visuals-api";
-import IVisual = powerbiVisualsApi.extensibility.visual.IVisual;
-import VisualConstructorOptions = powerbiVisualsApi.extensibility.visual.VisualConstructorOptions;
-import VisualUpdateOptions = powerbiVisualsApi.extensibility.visual.VisualUpdateOptions;
-import DataView = powerbiVisualsApi.DataView;
+#slider-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 10px;
+}
 
-export class Visual implements IVisual {
-    private target: HTMLElement;
-    private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
+#slider-container > div {
+  margin: 0 10px;
+  display: flex;
+  align-items: center;
+}
 
-    // Increase bottom margin so x-axis labels are visible.
-    private margin = { top: 20, right: 30, bottom: 50, left: 50 };
+#slider-container label {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 12px;
+  color: #333;
+  margin-right: 5px;
+}
 
-    // Stored data and estimated parameters.
-    private data: { x: Date, y: number }[] = [];
-    private lambdaHat: number = 0;
-    private muHat: number = 0;
-    private sigmaHat: number = 0;
-    private delta: number = 1;  // time step in ms
+#slider-container input[type="range"] {
+  width: 80px;  // Smaller slider
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #ddd;
+  border-radius: 5px;
+  outline: none;
+  margin: 0 5px;
+}
 
-    // Store current viewport dimensions.
-    private currentViewport: { width: number, height: number } = { width: 300, height: 200 };
+#slider-container input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #00818F;
+  cursor: pointer;
+  border: none;
+}
 
-    constructor(options: VisualConstructorOptions) {
-        this.target = options.element;
-        // Clear the target element.
-        this.target.innerHTML = "";
+#slider-container input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #00818F;
+  cursor: pointer;
+  border: none;
+}
 
-        // Create a container for HTML slider controls.
-        // Note: The slider styling is now handled by the visual.less file.
-        const sliderContainer = document.createElement("div");
-        sliderContainer.id = "slider-container";
-        sliderContainer.innerHTML = `
-            <div>
-                <label for="lambdaSlider">Lambda Factor:</label>
-                <input id="lambdaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
-                <span id="lambdaValue">1.0</span>
-            </div>
-            <div>
-                <label for="sigmaSlider">Sigma Factor:</label>
-                <input id="sigmaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
-                <span id="sigmaValue">1.0</span>
-            </div>
-        `;
-        this.target.appendChild(sliderContainer);
-
-        // Create the SVG container for the chart.
-        this.svg = d3.select(this.target)
-            .append("svg")
-            .classed("ou-estimation-visual", true);
-
-        // Create a tooltip div.
-        if (d3.select(this.target).select("div.tooltip").empty()) {
-            d3.select(this.target)
-              .append("div")
-              .attr("class", "tooltip")
-              .style("position", "absolute")
-              .style("pointer-events", "none")
-              .style("opacity", "0")
-              .style("background", "#fff")
-              .style("border", "1px solid #ccc")
-              .style("padding", "5px")
-              .style("border-radius", "3px")
-              .style("font-size", "12px");
-        }
-
-        // Attach HTML slider event listeners.
-        document.getElementById("lambdaSlider")?.addEventListener("input", (e: Event) => {
-            const input = e.target as HTMLInputElement;
-            document.getElementById("lambdaValue")!.innerText = input.value;
-            this.renderChart({ viewport: this.currentViewport } as VisualUpdateOptions);
-        });
-        document.getElementById("sigmaSlider")?.addEventListener("input", (e: Event) => {
-            const input = e.target as HTMLInputElement;
-            document.getElementById("sigmaValue")!.innerText = input.value;
-            this.renderChart({ viewport: this.currentViewport } as VisualUpdateOptions);
-        });
-    }
-
-    public update(options: VisualUpdateOptions) {
-        const dataView: DataView = options.dataViews && options.dataViews[0];
-        if (!dataView || !dataView.table) return;
-
-        // Update current viewport.
-        this.currentViewport = options.viewport;
-
-        const tableRows = dataView.table.rows;
-        if (!tableRows || tableRows.length === 0) return;
-
-        // Parse data: first column is a date, second column is a measure.
-        let rawData: { x: Date, y: number }[] = [];
-        tableRows.forEach((row: any[]) => {
-            const xVal = new Date(row[0]);
-            const yVal = +row[1];
-            if (!isNaN(xVal.getTime()) && !isNaN(yVal)) {
-                rawData.push({ x: xVal, y: yVal });
-            }
-        });
-        // Sort by date.
-        rawData.sort((a, b) => a.x.getTime() - b.x.getTime());
-        this.data = rawData;
-        if (rawData.length < 2) return;
-
-        // Compute time step (delta) in milliseconds.
-        const n = rawData.length - 1;
-        const firstTime = rawData[0].x.getTime();
-        const lastTime = rawData[rawData.length - 1].x.getTime();
-        this.delta = (lastTime - firstTime) / n;  // in ms
-        const deltaDays = this.delta / (1000 * 60 * 60 * 24);
-
-        // Estimate OU parameters from the y-values.
-        const yMean = d3.mean(rawData, d => d.y) as number;
-        let numerator = 0, denominator = 0;
-        for (let i = 0; i < n; i++) {
-            numerator += (rawData[i+1].y - yMean) * (rawData[i].y - yMean);
-            denominator += Math.pow(rawData[i].y - yMean, 2);
-        }
-        let alphaHat = numerator / denominator;
-        alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
-        this.lambdaHat = -Math.log(alphaHat) / deltaDays;
-
-        let sumResidual = 0;
-        for (let i = 0; i < n; i++) {
-            sumResidual += rawData[i+1].y - alphaHat * rawData[i].y;
-        }
-        this.muHat = sumResidual / (n * (1 - alphaHat));
-
-        let sumSq = 0;
-        for (let i = 0; i < n; i++) {
-            const r = rawData[i+1].y - alphaHat * rawData[i].y - (1 - alphaHat) * this.muHat;
-            sumSq += r * r;
-        }
-        const sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
-        this.sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
-
-        // Render the chart.
-        this.renderChart(options);
-    }
-
-    private renderChart(options?: VisualUpdateOptions) {
-        if (!this.data || this.data.length < 2) return;
-        const viewport = options?.viewport || this.currentViewport;
-        const lambdaSlider = document.getElementById("lambdaSlider") as HTMLInputElement;
-        const sigmaSlider = document.getElementById("sigmaSlider") as HTMLInputElement;
-        const lambdaFactor = parseFloat(lambdaSlider.value);
-        const sigmaFactor = parseFloat(sigmaSlider.value);
-        const newLambda = this.lambdaHat * lambdaFactor;
-        const newSigma = this.sigmaHat * sigmaFactor;
-        const deltaDays = this.delta / (1000 * 60 * 60 * 24);
-        const alpha = Math.exp(-newLambda * deltaDays);
-
-        // Clear previous SVG content.
-        this.svg.selectAll("*").remove();
-        const width = viewport.width || 300;
-        const height = viewport.height || 200;
-        this.svg.attr("width", width).attr("height", height);
-        const innerWidth = width - this.margin.left - this.margin.right;
-        const innerHeight = height - this.margin.top - this.margin.bottom;
-
-        const g = this.svg.append("g")
-            .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
-
-        // Forecast 50 steps ahead with 95% confidence bands.
-        const forecastSteps = 50;
-        const lastPoint = this.data[this.data.length - 1];
-        let forecastPoints: { x: Date, mean: number, lower: number, upper: number }[] = [];
-        for (let i = 1; i <= forecastSteps; i++) {
-            const nextX = new Date(lastPoint.x.getTime() + i * this.delta);
-            const mean = this.muHat + (lastPoint.y - this.muHat) * Math.pow(alpha, i);
-            const varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2 * i));
-            const stdDev = Math.sqrt(varForecast);
-            const lower = mean - 1.96 * stdDev;
-            const upper = mean + 1.96 * stdDev;
-            forecastPoints.push({ x: nextX, mean, lower, upper });
-        }
-        const forecastMeanLine = forecastPoints.map(d => ({ x: d.x, y: d.mean }));
-        const forecastLowerLine = forecastPoints.map(d => ({ x: d.x, y: d.lower }));
-        const forecastUpperLine = forecastPoints.map(d => ({ x: d.x, y: d.upper }));
-
-        // Combine historical and forecast data for scales.
-        const allX = this.data.map(d => d.x).concat(forecastMeanLine.map(d => d.x));
-        const allY = this.data.map(d => d.y)
-            .concat(forecastMeanLine.map(d => d.y))
-            .concat(forecastLowerLine.map(d => d.y))
-            .concat(forecastUpperLine.map(d => d.y));
-
-        const xScale = d3.scaleTime()
-            .domain([d3.min(allX) as Date, d3.max(allX) as Date])
-            .range([0, innerWidth]);
-        const yScale = d3.scaleLinear()
-            .domain([d3.min(allY) as number, d3.max(allY) as number])
-            .range([innerHeight, 0])
-            .nice();
-
-        // Dynamically determine tick count and rotate labels if necessary.
-        const tickCount = Math.max(2, Math.floor(innerWidth / 80));
-        const xAxis = d3.axisBottom(xScale)
-            .ticks(tickCount)
-            .tickFormat(d3.timeFormat("%b %d, %Y"));
-        const xAxisGroup = g.append("g")
-            .attr("transform", `translate(0, ${innerHeight})`)
-            .call(xAxis);
-        if(innerWidth < 300) {
-            xAxisGroup.selectAll("text")
-                .attr("transform", "rotate(-45)")
-                .style("text-anchor", "end");
-        }
-        g.append("g").call(d3.axisLeft(yScale));
-
-        const lineGen = d3.line<{ x: Date, y: number }>()
-            .x(d => xScale(d.x))
-            .y(d => yScale(d.y))
-            .curve(d3.curveMonotoneX);
-
-        // Draw forecast confidence bands (dashed grey).
-        g.append("path")
-            .datum(forecastLowerLine)
-            .attr("fill", "none")
-            .attr("stroke", "grey")
-            .attr("stroke-width", 1)
-            .style("stroke-dasharray", "3,3")
-            .attr("d", lineGen);
-        g.append("path")
-            .datum(forecastUpperLine)
-            .attr("fill", "none")
-            .attr("stroke", "grey")
-            .attr("stroke-width", 1)
-            .style("stroke-dasharray", "3,3")
-            .attr("d", lineGen);
-
-        // Draw forecast mean line (solid orange).
-        g.append("path")
-            .datum(forecastMeanLine)
-            .attr("fill", "none")
-            .attr("stroke", "orange")
-            .attr("stroke-width", 2)
-            .style("stroke-dasharray", "0")
-            .attr("d", lineGen);
-
-        // Draw historical data line (solid, color #00818F).
-        g.append("path")
-            .datum(this.data)
-            .attr("fill", "none")
-            .attr("stroke", "#00818F")
-            .attr("stroke-width", 2)
-            .style("stroke-dasharray", "0")
-            .attr("d", lineGen);
-
-        // Invisible circles for tooltips (historical).
-        g.selectAll("circle.historical")
-            .data(this.data)
-            .enter()
-            .append("circle")
-            .attr("class", "historical")
-            .attr("cx", d => xScale(d.x))
-            .attr("cy", d => yScale(d.y))
-            .attr("r", 5)
-            .attr("fill", "transparent")
-            .attr("stroke", "none")
-            .style("pointer-events", "all")
-            .on("mouseover", (event, d) => {
-                d3.select(this.target).select("div.tooltip")
-                    .transition().duration(200).style("opacity", 0.9);
-                d3.select(this.target).select("div.tooltip")
-                    .html(`Date: ${d.x.toLocaleDateString()}<br>Value: ${d.y.toFixed(2)}`)
-                    .style("left", (event.pageX + 5) + "px")
-                    .style("top", (event.pageY - 28) + "px");
-            })
-            .on("mousemove", (event, d) => {
-                d3.select(this.target).select("div.tooltip")
-                    .style("left", (event.pageX + 5) + "px")
-                    .style("top", (event.pageY - 28) + "px");
-            })
-            .on("mouseout", () => {
-                d3.select(this.target).select("div.tooltip")
-                    .transition().duration(500).style("opacity", 0);
-            });
-
-        // Invisible circles for tooltips (forecast).
-        g.selectAll("circle.forecast")
-            .data(forecastMeanLine)
-            .enter()
-            .append("circle")
-            .attr("class", "forecast")
-            .attr("cx", d => xScale(d.x))
-            .attr("cy", d => yScale(d.y))
-            .attr("r", 5)
-            .attr("fill", "transparent")
-            .attr("stroke", "none")
-            .style("pointer-events", "all")
-            .on("mouseover", (event, d) => {
-                d3.select(this.target).select("div.tooltip")
-                    .transition().duration(200).style("opacity", 0.9);
-                d3.select(this.target).select("div.tooltip")
-                    .html(`Date: ${d.x.toLocaleDateString()}<br>Mean: ${d.y.toFixed(2)}`)
-                    .style("left", (event.pageX + 5) + "px")
-                    .style("top", (event.pageY - 28) + "px");
-            })
-            .on("mousemove", (event, d) => {
-                d3.select(this.target).select("div.tooltip")
-                    .style("left", (event.pageX + 5) + "px")
-                    .style("top", (event.pageY - 28) + "px");
-            })
-            .on("mouseout", () => {
-                d3.select(this.target).select("div.tooltip")
-                    .transition().duration(500).style("opacity", 0);
-            });
-
-        // Display parameter estimates above the chart.
-        g.append("text")
-            .attr("x", 10)
-            .attr("y", -10)
-            .attr("fill", "#333")
-            .style("font-size", "12px")
-            .text(`μ = ${this.muHat.toFixed(2)}, λ = ${this.lambdaHat.toFixed(2)} (×${lambdaFactor}), σ = ${this.sigmaHat.toFixed(2)} (×${sigmaFactor})`);
-    }
+#slider-container span {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 12px;
+  color: #333;
 }
