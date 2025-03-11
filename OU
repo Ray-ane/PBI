@@ -1,12 +1,11 @@
 "use strict";
-
-import "core-js/stable";
-import "regenerator-runtime/runtime";
+import "./../style/visual.less";
 import * as d3 from "d3";
-import * as powerbi from "powerbi-visuals-api";
-import DataView = powerbi.DataView;
-import IVisual = powerbi.extensibility.visual.IVisual;
-import VisualUpdateOptions = powerbi.extensibility.visual.VisualUpdateOptions;
+import powerbiVisualsApi from "powerbi-visuals-api";
+import IVisual = powerbiVisualsApi.extensibility.visual.IVisual;
+import VisualConstructorOptions = powerbiVisualsApi.extensibility.visual.VisualConstructorOptions;
+import VisualUpdateOptions = powerbiVisualsApi.extensibility.visual.VisualUpdateOptions;
+import DataView = powerbiVisualsApi.DataView;
 
 export class Visual implements IVisual {
     private target: HTMLElement;
@@ -26,7 +25,7 @@ export class Visual implements IVisual {
     private sigmaHat: number = 0;
     private delta: number = 1;  // time step
 
-    constructor(options: powerbi.extensibility.visual.VisualConstructorOptions) {
+    constructor(options: VisualConstructorOptions) {
         this.target = options.element;
 
         // Create the main SVG element.
@@ -215,7 +214,7 @@ export class Visual implements IVisual {
         let forecastLowerLine = forecastPoints.map(d => ({ x: d.x, y: d.lower }));
         let forecastUpperLine = forecastPoints.map(d => ({ x: d.x, y: d.upper }));
 
-        // Combine all points (including bands) to set the scales.
+        // Combine all points to set the scales.
         let allXData = this.data.map(d => d.x)
             .concat(forecastMeanLine.map(d => d.x))
             .concat(forecastLowerLine.map(d => d.x))
