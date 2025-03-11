@@ -15,11 +15,12 @@ export class Visual implements IVisual {
     private margin = { top: 20, right: 30, bottom: 40, left: 50 };
 
     // Stored data and estimated parameters.
-    private data: { x: number, y: number }[] = [];
+    // x is now a Date, y remains a number.
+    private data: { x: Date, y: number }[] = [];
     private lambdaHat: number = 0;
     private muHat: number = 0;
     private sigmaHat: number = 0;
-    private delta: number = 1;  // time step
+    private delta: number = 1;  // time step in ms
 
     constructor(options: VisualConstructorOptions) {
         this.target = options.element;
@@ -76,32 +77,39 @@ export class Visual implements IVisual {
         const tableRows = dataView.table.rows;
         if (!tableRows || tableRows.length === 0) return;
 
-        let rawData: { x: number, y: number }[] = [];
+        // Parse data assuming first column is a date and second column is a measure.
+        let rawData: { x: Date, y: number }[] = [];
         tableRows.forEach((row: any[]) => {
-            const xVal = +row[0];
+            const xVal = new Date(row[0]);
             const yVal = +row[1];
-            if (!isNaN(xVal) && !isNaN(yVal)) {
+            if (!isNaN(xVal.getTime()) && !isNaN(yVal)) {
                 rawData.push({ x: xVal, y: yVal });
             }
         });
-        // Sort by x value.
-        rawData.sort((a, b) => a.x - b.x);
+        // Sort by date.
+        rawData.sort((a, b) => a.x.getTime() - b.x.getTime());
         this.data = rawData;
         if (rawData.length < 2) return;
 
-        // Estimate OU parameters.
+        // Compute time step (delta) in milliseconds.
         const n = rawData.length - 1;
-        this.delta = (rawData[rawData.length - 1].x - rawData[0].x) / n;
-        const xMean = d3.mean(rawData, d => d.y) as number;
+        const firstTime = rawData[0].x.getTime();
+        const lastTime = rawData[rawData.length - 1].x.getTime();
+        this.delta = (lastTime - firstTime) / n;  // in ms
+        // Convert delta to days (used in OU parameter estimation).
+        const deltaDays = this.delta / (1000 * 60 * 60 * 24);
+
+        // Estimate OU parameters from the y-values.
+        const yMean = d3.mean(rawData, d => d.y) as number;
         let numerator = 0, denominator = 0;
         for (let i = 0; i < n; i++) {
-            numerator += (rawData[i+1].y - xMean) * (rawData[i].y - xMean);
-            denominator += Math.pow(rawData[i].y - xMean, 2);
+            numerator += (rawData[i+1].y - yMean) * (rawData[i].y - yMean);
+            denominator += Math.pow(rawData[i].y - yMean, 2);
         }
         let alphaHat = numerator / denominator;
-        // Avoid extremes.
+        // Bound alphaHat to avoid issues.
         alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
-        this.lambdaHat = -Math.log(alphaHat) / this.delta;
+        this.lambdaHat = -Math.log(alphaHat) / deltaDays;
 
         let sumResidual = 0;
         for (let i = 0; i < n; i++) {
@@ -114,7 +122,7 @@ export class Visual implements IVisual {
             const r = rawData[i+1].y - alphaHat * rawData[i].y - (1 - alphaHat) * this.muHat;
             sumSq += r * r;
         }
-        const sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1/n) * sumSq;
+        const sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
         this.sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
 
         // Render the chart.
@@ -124,38 +132,40 @@ export class Visual implements IVisual {
     private renderChart(options?: VisualUpdateOptions) {
         if (!this.data || this.data.length < 2) return;
 
-        // Read slider values from HTML.
+        // Get slider values.
         const lambdaSlider = document.getElementById("lambdaSlider") as HTMLInputElement;
         const sigmaSlider = document.getElementById("sigmaSlider") as HTMLInputElement;
         const lambdaFactor = parseFloat(lambdaSlider.value);
         const sigmaFactor = parseFloat(sigmaSlider.value);
 
-        // Compute effective parameters.
+        // Effective parameters.
         const newLambda = this.lambdaHat * lambdaFactor;
         const newSigma = this.sigmaHat * sigmaFactor;
-        const alpha = Math.exp(-newLambda * this.delta);
+        const deltaDays = this.delta / (1000 * 60 * 60 * 24);
+        // Use deltaDays in the OU forecast.
+        const alpha = Math.exp(-newLambda * deltaDays);
 
-        // Clear the SVG.
+        // Clear previous SVG contents.
         this.svg.selectAll("*").remove();
 
         // Set SVG dimensions.
         const width = options?.viewport.width || 300;
         const height = options?.viewport.height || 200;
         this.svg.attr("width", width).attr("height", height);
-
         const innerWidth = width - this.margin.left - this.margin.right;
         const innerHeight = height - this.margin.top - this.margin.bottom;
 
-        // Append a group for the chart content.
+        // Append a group for chart content.
         const g = this.svg.append("g")
             .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
 
         // Forecast 50 steps ahead with 95% confidence bands.
         const forecastSteps = 50;
         const lastPoint = this.data[this.data.length - 1];
-        const forecastPoints: { x: number, mean: number, lower: number, upper: number }[] = [];
+        let forecastPoints: { x: Date, mean: number, lower: number, upper: number }[] = [];
         for (let i = 1; i <= forecastSteps; i++) {
-            const nextX = lastPoint.x + i * this.delta;
+            // Compute next x as a new Date by adding i * delta (in ms) to the last point.
+            const nextX = new Date(lastPoint.x.getTime() + i * this.delta);
             const mean = this.muHat + (lastPoint.y - this.muHat) * Math.pow(alpha, i);
             const varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2 * i));
             const stdDev = Math.sqrt(varForecast);
@@ -163,22 +173,21 @@ export class Visual implements IVisual {
             const upper = mean + 1.96 * stdDev;
             forecastPoints.push({ x: nextX, mean, lower, upper });
         }
-
         const forecastMeanLine = forecastPoints.map(d => ({ x: d.x, y: d.mean }));
         const forecastLowerLine = forecastPoints.map(d => ({ x: d.x, y: d.lower }));
         const forecastUpperLine = forecastPoints.map(d => ({ x: d.x, y: d.upper }));
 
-        // Combine historical and forecast data to compute scales.
+        // Combine x and y values from historical and forecast for scales.
         const allX = this.data.map(d => d.x).concat(forecastMeanLine.map(d => d.x));
         const allY = this.data.map(d => d.y)
             .concat(forecastMeanLine.map(d => d.y))
             .concat(forecastLowerLine.map(d => d.y))
             .concat(forecastUpperLine.map(d => d.y));
 
-        const xScale = d3.scaleLinear()
-            .domain([d3.min(allX) as number, d3.max(allX) as number])
+        // Create a time scale for x.
+        const xScale = d3.scaleTime()
+            .domain([d3.min(allX) as Date, d3.max(allX) as Date])
             .range([0, innerWidth]);
-
         const yScale = d3.scaleLinear()
             .domain([d3.min(allY) as number, d3.max(allY) as number])
             .range([innerHeight, 0])
@@ -191,13 +200,13 @@ export class Visual implements IVisual {
         g.append("g")
             .call(d3.axisLeft(yScale));
 
-        // Define line generator.
-        const lineGen = d3.line<{ x: number, y: number }>()
+        // Define a line generator.
+        const lineGen = d3.line<{ x: Date, y: number }>()
             .x(d => xScale(d.x))
             .y(d => yScale(d.y))
             .curve(d3.curveMonotoneX);
 
-        // Draw the historical data line (blue).
+        // Draw historical data line (blue).
         g.append("path")
             .datum(this.data)
             .attr("fill", "none")
@@ -205,7 +214,7 @@ export class Visual implements IVisual {
             .attr("stroke-width", 2)
             .attr("d", lineGen);
 
-        // Draw the forecast mean line (orange).
+        // Draw forecast mean line (orange).
         g.append("path")
             .datum(forecastMeanLine)
             .attr("fill", "none")
@@ -213,7 +222,7 @@ export class Visual implements IVisual {
             .attr("stroke-width", 2)
             .attr("d", lineGen);
 
-        // Draw the forecast confidence bands (dashed grey).
+        // Draw forecast confidence bands (dashed grey).
         g.append("path")
             .datum(forecastLowerLine)
             .attr("fill", "none")
@@ -229,7 +238,7 @@ export class Visual implements IVisual {
             .style("stroke-dasharray", ("3, 3"))
             .attr("d", lineGen);
 
-        // Add circles on the forecast mean line with tooltips.
+        // Add circles on forecast mean line with tooltips.
         const tooltip = d3.select(this.target).select("div.tooltip");
         g.selectAll("circle.forecast")
             .data(forecastMeanLine)
@@ -242,7 +251,7 @@ export class Visual implements IVisual {
             .attr("fill", "orange")
             .on("mouseover", (event, d) => {
                 tooltip.transition().duration(200).style("opacity", 0.9);
-                tooltip.html(`x: ${d.x.toFixed(2)}<br>Mean: ${d.y.toFixed(2)}`)
+                tooltip.html(`x: ${d.x.toLocaleDateString()}<br>Mean: ${d.y.toFixed(2)}`)
                     .style("left", (event.pageX + 5) + "px")
                     .style("top", (event.pageY - 28) + "px");
             })
