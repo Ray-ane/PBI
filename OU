@@ -116,7 +116,7 @@ export class Visual implements IVisual {
         // Convert delta to days for OU parameter estimation.
         const deltaDays = this.delta / (1000 * 60 * 60 * 24);
 
-        // Estimate OU parameters from the y-values.
+        // Estimate OU parameters from y-values.
         const yMean = d3.mean(rawData, d => d.y) as number;
         let numerator = 0, denominator = 0;
         for (let i = 0; i < n; i++) {
@@ -225,7 +225,7 @@ export class Visual implements IVisual {
             .y(d => yScale(d.y))
             .curve(d3.curveMonotoneX);
 
-        // Draw the historical data line (color #00818F).
+        // Draw the historical data line (continuous, color #00818F).
         g.append("path")
             .datum(this.data)
             .attr("fill", "none")
@@ -233,7 +233,7 @@ export class Visual implements IVisual {
             .attr("stroke-width", 2)
             .attr("d", lineGen);
 
-        // Draw the forecast mean line (orange, continuous).
+        // Draw the forecast mean line (continuous, orange).
         g.append("path")
             .datum(forecastMeanLine)
             .attr("fill", "none")
