@@ -11,11 +11,10 @@ export class Visual implements IVisual {
     private target: HTMLElement;
     private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
 
-    // Chart margins.
-    private margin = { top: 20, right: 30, bottom: 40, left: 50 };
+    // Increase bottom margin so x-axis labels are visible.
+    private margin = { top: 20, right: 30, bottom: 50, left: 50 };
 
     // Stored data and estimated parameters.
-    // x is a Date, y is a number.
     private data: { x: Date, y: number }[] = [];
     private lambdaHat: number = 0;
     private muHat: number = 0;
@@ -162,7 +161,7 @@ export class Visual implements IVisual {
         const newLambda = this.lambdaHat * lambdaFactor;
         const newSigma = this.sigmaHat * sigmaFactor;
         const deltaDays = this.delta / (1000 * 60 * 60 * 24);
-        // Use deltaDays in the OU forecast.
+        // OU model: alpha = exp(-lambda * deltaDays)
         const alpha = Math.exp(-newLambda * deltaDays);
 
         // Clear previous SVG contents.
@@ -225,15 +224,23 @@ export class Visual implements IVisual {
             .y(d => yScale(d.y))
             .curve(d3.curveMonotoneX);
 
-        // Draw the historical data line (continuous, color #00818F).
+        // Draw forecast confidence bands first (dashed grey).
         g.append("path")
-            .datum(this.data)
+            .datum(forecastLowerLine)
             .attr("fill", "none")
-            .attr("stroke", "#00818F")
-            .attr("stroke-width", 2)
+            .attr("stroke", "grey")
+            .attr("stroke-width", 1)
+            .style("stroke-dasharray", "3, 3")
+            .attr("d", lineGen);
+        g.append("path")
+            .datum(forecastUpperLine)
+            .attr("fill", "none")
+            .attr("stroke", "grey")
+            .attr("stroke-width", 1)
+            .style("stroke-dasharray", "3, 3")
             .attr("d", lineGen);
 
-        // Draw the forecast mean line (continuous, orange).
+        // Draw the forecast mean line (solid orange) on top.
         g.append("path")
             .datum(forecastMeanLine)
             .attr("fill", "none")
@@ -241,20 +248,12 @@ export class Visual implements IVisual {
             .attr("stroke-width", 2)
             .attr("d", lineGen);
 
-        // Draw forecast confidence bands (dashed grey).
+        // Draw the historical data line (solid, color #00818F) on top.
         g.append("path")
-            .datum(forecastLowerLine)
+            .datum(this.data)
             .attr("fill", "none")
-            .attr("stroke", "grey")
-            .attr("stroke-width", 1)
-            .style("stroke-dasharray", ("3, 3"))
-            .attr("d", lineGen);
-        g.append("path")
-            .datum(forecastUpperLine)
-            .attr("fill", "none")
-            .attr("stroke", "grey")
-            .attr("stroke-width", 1)
-            .style("stroke-dasharray", ("3, 3"))
+            .attr("stroke", "#00818F")
+            .attr("stroke-width", 2)
             .attr("d", lineGen);
 
         // Add circles on historical data with tooltips.
