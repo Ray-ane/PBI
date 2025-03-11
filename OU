@@ -11,12 +11,8 @@ export class Visual implements IVisual {
     private target: HTMLElement;
     private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
 
-    // Sliders for λ and σ scaling factors.
-    private lambdaSlider: d3.Selection<HTMLInputElement, unknown, null, undefined>;
-    private sigmaSlider: d3.Selection<HTMLInputElement, unknown, null, undefined>;
-
     // Chart margins.
-    private margin = { top: 70, right: 30, bottom: 40, left: 50 };
+    private margin = { top: 20, right: 30, bottom: 40, left: 50 };
 
     // Stored data and estimated parameters.
     private data: { x: number, y: number }[] = [];
@@ -27,54 +23,33 @@ export class Visual implements IVisual {
 
     constructor(options: VisualConstructorOptions) {
         this.target = options.element;
+        // Clear the target element.
+        this.target.innerHTML = "";
 
-        // Create the main SVG element.
+        // Create a container for HTML slider controls.
+        const sliderContainer = document.createElement("div");
+        sliderContainer.id = "slider-container";
+        sliderContainer.style.display = "flex";
+        sliderContainer.style.justifyContent = "space-around";
+        sliderContainer.style.marginBottom = "10px";
+        sliderContainer.innerHTML = `
+            <div>
+                <label for="lambdaSlider">Lambda Factor:</label>
+                <input id="lambdaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+            </div>
+            <div>
+                <label for="sigmaSlider">Sigma Factor:</label>
+                <input id="sigmaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+            </div>
+        `;
+        this.target.appendChild(sliderContainer);
+
+        // Create the SVG container for the chart.
         this.svg = d3.select(this.target)
             .append("svg")
             .classed("ou-estimation-visual", true);
 
-        // ---------------------------------------------------------------------
-        // Create two sliders (for λ and σ scaling factors) as HTML elements.
-        // ---------------------------------------------------------------------
-        this.lambdaSlider = d3.select(this.target)
-            .append("input")
-            .attr("type", "range")
-            .attr("min", "0.5")
-            .attr("max", "2.0")
-            .attr("step", "0.01")
-            .attr("value", "1.0")
-            .style("position", "absolute")
-            .style("top", "10px")
-            .style("left", "10px");
-
-        d3.select(this.target)
-            .append("label")
-            .text("Lambda Factor")
-            .style("position", "absolute")
-            .style("top", "10px")
-            .style("left", "130px");
-
-        this.sigmaSlider = d3.select(this.target)
-            .append("input")
-            .attr("type", "range")
-            .attr("min", "0.5")
-            .attr("max", "2.0")
-            .attr("step", "0.01")
-            .attr("value", "1.0")
-            .style("position", "absolute")
-            .style("top", "10px")
-            .style("left", "220px");
-
-        d3.select(this.target)
-            .append("label")
-            .text("Sigma Factor")
-            .style("position", "absolute")
-            .style("top", "10px")
-            .style("left", "340px");
-
-        // ---------------------------------------------------------------------
-        // Create a tooltip div for hover details.
-        // ---------------------------------------------------------------------
+        // Create a tooltip div.
         if (d3.select(this.target).select("div.tooltip").empty()) {
             d3.select(this.target)
               .append("div")
@@ -89,169 +64,140 @@ export class Visual implements IVisual {
               .style("font-size", "12px");
         }
 
-        // ---------------------------------------------------------------------
-        // Attach slider event handlers to re-render the chart when sliders move.
-        // ---------------------------------------------------------------------
-        this.lambdaSlider.on("input", () => {
-            this.renderChart();
-        });
-        this.sigmaSlider.on("input", () => {
-            this.renderChart();
-        });
+        // Attach HTML slider event listeners.
+        document.getElementById("lambdaSlider")?.addEventListener("input", () => this.renderChart());
+        document.getElementById("sigmaSlider")?.addEventListener("input", () => this.renderChart());
     }
 
     public update(options: VisualUpdateOptions) {
         const dataView: DataView = options.dataViews && options.dataViews[0];
-        if (!dataView || !dataView.table) {
-            return;
-        }
+        if (!dataView || !dataView.table) return;
 
-        // ---------------------------------------------------------------------
-        // 1. Parse the table data (assumes first column = x, second column = y).
-        // ---------------------------------------------------------------------
-        let tableRows = dataView.table.rows;
-        if (!tableRows || tableRows.length === 0) {
-            return;
-        }
+        const tableRows = dataView.table.rows;
+        if (!tableRows || tableRows.length === 0) return;
 
         let rawData: { x: number, y: number }[] = [];
         tableRows.forEach((row: any[]) => {
-            let xVal = +row[0];
-            let yVal = +row[1];
+            const xVal = +row[0];
+            const yVal = +row[1];
             if (!isNaN(xVal) && !isNaN(yVal)) {
                 rawData.push({ x: xVal, y: yVal });
             }
         });
+        // Sort by x value.
         rawData.sort((a, b) => a.x - b.x);
         this.data = rawData;
-        if (rawData.length < 2) {
-            return; // Not enough data.
-        }
+        if (rawData.length < 2) return;
 
-        // ---------------------------------------------------------------------
-        // 2. Estimate OU parameters from historical data.
-        // ---------------------------------------------------------------------
-        let n = rawData.length - 1;
+        // Estimate OU parameters.
+        const n = rawData.length - 1;
         this.delta = (rawData[rawData.length - 1].x - rawData[0].x) / n;
-        let xMean = d3.mean(rawData, d => d.y) as number;
+        const xMean = d3.mean(rawData, d => d.y) as number;
         let numerator = 0, denominator = 0;
         for (let i = 0; i < n; i++) {
-            numerator += (rawData[i + 1].y - xMean) * (rawData[i].y - xMean);
+            numerator += (rawData[i+1].y - xMean) * (rawData[i].y - xMean);
             denominator += Math.pow(rawData[i].y - xMean, 2);
         }
         let alphaHat = numerator / denominator;
-        // Bound alphaHat to avoid log(0) or negative lambda.
+        // Avoid extremes.
         alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
         this.lambdaHat = -Math.log(alphaHat) / this.delta;
 
         let sumResidual = 0;
         for (let i = 0; i < n; i++) {
-            sumResidual += rawData[i + 1].y - alphaHat * rawData[i].y;
+            sumResidual += rawData[i+1].y - alphaHat * rawData[i].y;
         }
         this.muHat = sumResidual / (n * (1 - alphaHat));
 
         let sumSq = 0;
         for (let i = 0; i < n; i++) {
-            let r = rawData[i + 1].y - alphaHat * rawData[i].y - (1 - alphaHat) * this.muHat;
+            const r = rawData[i+1].y - alphaHat * rawData[i].y - (1 - alphaHat) * this.muHat;
             sumSq += r * r;
         }
-        let sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
+        const sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1/n) * sumSq;
         this.sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
 
-        // ---------------------------------------------------------------------
-        // 3. Render the chart with current data and parameters.
-        // ---------------------------------------------------------------------
+        // Render the chart.
         this.renderChart(options);
     }
 
     private renderChart(options?: VisualUpdateOptions) {
-        if (!this.data || this.data.length < 2) {
-            return;
-        }
+        if (!this.data || this.data.length < 2) return;
 
-        // Read current slider values.
-        const lambdaFactor = parseFloat(this.lambdaSlider.property("value"));
-        const sigmaFactor = parseFloat(this.sigmaSlider.property("value"));
+        // Read slider values from HTML.
+        const lambdaSlider = document.getElementById("lambdaSlider") as HTMLInputElement;
+        const sigmaSlider = document.getElementById("sigmaSlider") as HTMLInputElement;
+        const lambdaFactor = parseFloat(lambdaSlider.value);
+        const sigmaFactor = parseFloat(sigmaSlider.value);
 
-        // Effective parameters.
+        // Compute effective parameters.
         const newLambda = this.lambdaHat * lambdaFactor;
         const newSigma = this.sigmaHat * sigmaFactor;
         const alpha = Math.exp(-newLambda * this.delta);
 
-        // Clear previous SVG contents.
+        // Clear the SVG.
         this.svg.selectAll("*").remove();
 
-        // Use viewport dimensions if available; otherwise, default values.
-        let width = options?.viewport.width || 300;
-        let height = options?.viewport.height || 200;
+        // Set SVG dimensions.
+        const width = options?.viewport.width || 300;
+        const height = options?.viewport.height || 200;
         this.svg.attr("width", width).attr("height", height);
-        let innerWidth = width - this.margin.left - this.margin.right;
-        let innerHeight = height - this.margin.top - this.margin.bottom;
 
-        // Create chart group.
-        let g = this.svg.append("g")
+        const innerWidth = width - this.margin.left - this.margin.right;
+        const innerHeight = height - this.margin.top - this.margin.bottom;
+
+        // Append a group for the chart content.
+        const g = this.svg.append("g")
             .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
 
-        // ---------------------------------------------------------------------
-        // 4. Forecast 50 steps ahead with 95% confidence bands.
-        // ---------------------------------------------------------------------
+        // Forecast 50 steps ahead with 95% confidence bands.
         const forecastSteps = 50;
-        let lastPoint = this.data[this.data.length - 1];
-        let forecastPoints: { x: number, mean: number, lower: number, upper: number }[] = [];
+        const lastPoint = this.data[this.data.length - 1];
+        const forecastPoints: { x: number, mean: number, lower: number, upper: number }[] = [];
         for (let i = 1; i <= forecastSteps; i++) {
-            let nextX = lastPoint.x + i * this.delta;
-            // Mean forecast: μ + (X_last - μ)*α^i.
-            let mean = this.muHat + (lastPoint.y - this.muHat) * Math.pow(alpha, i);
-            // Variance forecast: (σ²/(2λ))*(1 - α^(2i)).
-            let varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2 * i));
-            let stdDev = Math.sqrt(varForecast);
-            let lower = mean - 1.96 * stdDev;
-            let upper = mean + 1.96 * stdDev;
-            forecastPoints.push({ x: nextX, mean: mean, lower: lower, upper: upper });
+            const nextX = lastPoint.x + i * this.delta;
+            const mean = this.muHat + (lastPoint.y - this.muHat) * Math.pow(alpha, i);
+            const varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2 * i));
+            const stdDev = Math.sqrt(varForecast);
+            const lower = mean - 1.96 * stdDev;
+            const upper = mean + 1.96 * stdDev;
+            forecastPoints.push({ x: nextX, mean, lower, upper });
         }
 
-        // Prepare arrays for forecast mean, lower, and upper bands.
-        let forecastMeanLine = forecastPoints.map(d => ({ x: d.x, y: d.mean }));
-        let forecastLowerLine = forecastPoints.map(d => ({ x: d.x, y: d.lower }));
-        let forecastUpperLine = forecastPoints.map(d => ({ x: d.x, y: d.upper }));
+        const forecastMeanLine = forecastPoints.map(d => ({ x: d.x, y: d.mean }));
+        const forecastLowerLine = forecastPoints.map(d => ({ x: d.x, y: d.lower }));
+        const forecastUpperLine = forecastPoints.map(d => ({ x: d.x, y: d.upper }));
 
-        // Combine all points to set the scales.
-        let allXData = this.data.map(d => d.x)
-            .concat(forecastMeanLine.map(d => d.x))
-            .concat(forecastLowerLine.map(d => d.x))
-            .concat(forecastUpperLine.map(d => d.x));
-        let allYData = this.data.map(d => d.y)
+        // Combine historical and forecast data to compute scales.
+        const allX = this.data.map(d => d.x).concat(forecastMeanLine.map(d => d.x));
+        const allY = this.data.map(d => d.y)
             .concat(forecastMeanLine.map(d => d.y))
             .concat(forecastLowerLine.map(d => d.y))
             .concat(forecastUpperLine.map(d => d.y));
 
-        // ---------------------------------------------------------------------
-        // 5. Define scales and axes.
-        // ---------------------------------------------------------------------
-        let xScale = d3.scaleLinear()
-            .domain([d3.min(allXData) as number, d3.max(allXData) as number])
+        const xScale = d3.scaleLinear()
+            .domain([d3.min(allX) as number, d3.max(allX) as number])
             .range([0, innerWidth]);
 
-        let yScale = d3.scaleLinear()
-            .domain([d3.min(allYData) as number, d3.max(allYData) as number])
+        const yScale = d3.scaleLinear()
+            .domain([d3.min(allY) as number, d3.max(allY) as number])
             .range([innerHeight, 0])
             .nice();
 
+        // Append axes.
         g.append("g")
             .attr("transform", `translate(0, ${innerHeight})`)
             .call(d3.axisBottom(xScale));
         g.append("g")
             .call(d3.axisLeft(yScale));
 
-        // ---------------------------------------------------------------------
-        // 6. Define line generators.
-        // ---------------------------------------------------------------------
-        let lineGen = d3.line<{ x: number; y: number }>()
+        // Define line generator.
+        const lineGen = d3.line<{ x: number, y: number }>()
             .x(d => xScale(d.x))
             .y(d => yScale(d.y))
             .curve(d3.curveMonotoneX);
 
-        // Historical data line (blue).
+        // Draw the historical data line (blue).
         g.append("path")
             .datum(this.data)
             .attr("fill", "none")
@@ -259,7 +205,7 @@ export class Visual implements IVisual {
             .attr("stroke-width", 2)
             .attr("d", lineGen);
 
-        // Forecast mean line (orange).
+        // Draw the forecast mean line (orange).
         g.append("path")
             .datum(forecastMeanLine)
             .attr("fill", "none")
@@ -267,7 +213,7 @@ export class Visual implements IVisual {
             .attr("stroke-width", 2)
             .attr("d", lineGen);
 
-        // Forecast lower band line (dashed grey).
+        // Draw the forecast confidence bands (dashed grey).
         g.append("path")
             .datum(forecastLowerLine)
             .attr("fill", "none")
@@ -275,8 +221,6 @@ export class Visual implements IVisual {
             .attr("stroke-width", 1)
             .style("stroke-dasharray", ("3, 3"))
             .attr("d", lineGen);
-
-        // Forecast upper band line (dashed grey).
         g.append("path")
             .datum(forecastUpperLine)
             .attr("fill", "none")
@@ -285,10 +229,8 @@ export class Visual implements IVisual {
             .style("stroke-dasharray", ("3, 3"))
             .attr("d", lineGen);
 
-        // ---------------------------------------------------------------------
-        // 7. Add forecast circles with tooltips.
-        // ---------------------------------------------------------------------
-        let tooltip = d3.select(this.target).select("div.tooltip");
+        // Add circles on the forecast mean line with tooltips.
+        const tooltip = d3.select(this.target).select("div.tooltip");
         g.selectAll("circle.forecast")
             .data(forecastMeanLine)
             .enter()
@@ -312,15 +254,12 @@ export class Visual implements IVisual {
                 tooltip.transition().duration(500).style("opacity", 0);
             });
 
-        // ---------------------------------------------------------------------
-        // 8. Display parameter estimates and current slider factors.
-        // ---------------------------------------------------------------------
-        let paramStr = `μ = ${this.muHat.toFixed(2)}, λ = ${this.lambdaHat.toFixed(2)} (×${lambdaFactor}), σ = ${this.sigmaHat.toFixed(2)} (×${sigmaFactor})`;
+        // Display parameter estimates above the chart.
         g.append("text")
             .attr("x", 10)
-            .attr("y", -40)
+            .attr("y", -10)
             .attr("fill", "#333")
             .style("font-size", "12px")
-            .text(paramStr);
+            .text(`μ = ${this.muHat.toFixed(2)}, λ = ${this.lambdaHat.toFixed(2)} (×${lambdaFactor}), σ = ${this.sigmaHat.toFixed(2)} (×${sigmaFactor})`);
     }
 }
