@@ -1,56 +1,147 @@
-#slider-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  margin-bottom: 10px;
-}
+# Ornstein–Uhlenbeck (OU) Process: MLE Formulas and Forecasting
 
-#slider-container > div {
-  margin: 0 10px;
-  display: flex;
-  align-items: center;
-}
+Below is a concise yet comprehensive set of formulas used for estimating an Ornstein–Uhlenbeck (OU) process in discrete time, along with explanations for each step. This covers:
 
-#slider-container label {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  font-size: 12px;
-  color: #333;
-  margin-right: 5px;
-}
+1. **Discrete-Time OU Approximation**  
+2. **Maximum Likelihood (ML) Parameter Estimation**  
+3. **Forecasting the Expected Future Path**
 
-#slider-container input[type="range"] {
-  width: 80px;  // Smaller slider
-  height: 4px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: #ddd;
-  border-radius: 5px;
-  outline: none;
-  margin: 0 5px;
-}
+---
 
-#slider-container input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #00818F;
-  cursor: pointer;
-  border: none;
-}
+## 1. Discrete-Time Ornstein–Uhlenbeck Model
 
-#slider-container input[type="range"]::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #00818F;
-  cursor: pointer;
-  border: none;
-}
+A continuous-time OU process is given by:
 
-#slider-container span {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  font-size: 12px;
-  color: #333;
-}
+\[
+dX_t = \lambda \bigl(\mu - X_t\bigr)\,dt + \sigma\,dW_t,
+\]
+
+where
+
+- \(\mu\) is the long-term mean,
+- \(\lambda > 0\) is the mean-reversion rate,
+- \(\sigma > 0\) is the volatility parameter,
+- \(W_t\) is a standard Wiener process.
+
+When **observing** the process at discrete times \(t_i = i\,\delta\) (with \(\delta\) constant), we can write:
+
+\[
+X_{i+1} 
+= 
+\alpha\,X_i 
++ 
+(1 - \alpha)\,\mu 
++ 
+\text{noise},
+\quad
+\text{where}
+\quad
+\alpha = e^{-\lambda\,\delta}.
+\]
+
+The noise term is normally distributed with variance 
+\(\frac{\sigma^2}{2\lambda}\bigl(1-e^{-2\lambda \delta}\bigr)\), but for MLE derivation, we focus on the mean relationship.
+
+---
+
+## 2. Maximum Likelihood Parameter Estimation
+
+Given **\(n+1\)** observations \(\{X_0, X_1, \dots, X_n\}\) at times \(\{0,\delta,2\delta,\dots,n\delta\}\), we can estimate \(\alpha\), \(\lambda\), \(\mu\), and \(\sigma^2\) by **maximizing** the Gaussian log-likelihood implied by the discrete-time model.
+
+### 2.1 Estimating \(\alpha\)
+
+Let \(\bar{X} = \frac{1}{n+1}\sum_{i=0}^{n} X_i\). Then:
+
+\[
+\widehat{\alpha}
+=
+\frac{\sum_{i=0}^{n-1} (X_{i+1} - \bar{X})(X_{i} - \bar{X})}
+     {\sum_{i=0}^{n-1} (X_{i} - \bar{X})^2}.
+\]
+
+> **Intuition**: \(\alpha\) is essentially the sample lag-1 autocorrelation after centering the data.
+
+### 2.2 Estimating \(\lambda\)
+
+Recall \(\alpha = e^{-\lambda \delta}\). Hence:
+
+\[
+\widehat{\lambda}
+=
+-\frac{1}{\delta} \ln(\widehat{\alpha}).
+\]
+
+### 2.3 Estimating \(\mu\)
+
+From the discrete-time model \(X_{i+1} = \alpha\,X_i + (1-\alpha)\,\mu + \dots\), we get:
+
+\[
+\widehat{\mu}
+=
+\frac{\sum_{i=0}^{n-1} \bigl(X_{i+1} - \widehat{\alpha}\,X_i\bigr)}
+     {n\,\bigl(1 - \widehat{\alpha}\bigr)}.
+\]
+
+### 2.4 Estimating \(\sigma^2\)
+
+Define the residual:
+
+\[
+\text{residual}_i 
+= 
+X_{i+1} 
+- 
+\widehat{\alpha}\,X_i 
+- 
+\bigl(1 - \widehat{\alpha}\bigr)\,\widehat{\mu}.
+\]
+
+Then:
+
+\[
+\widehat{\sigma}^2
+=
+\frac{2\,\widehat{\lambda}}{\,1-\widehat{\alpha}^2\,}
+\times
+\frac{1}{n}
+\sum_{i=0}^{n-1}
+\bigl(\text{residual}_i\bigr)^2.
+\]
+
+---
+
+## 3. Forecasting the Expected Future Path
+
+Once we have \(\widehat{\alpha} = e^{-\widehat{\lambda}\,\delta}\) and \(\widehat{\mu}\), the **mean** forecast for **\(k\) steps** into the future (beyond \(X_n\)) is:
+
+\[
+X_{n+k}^{(\text{expected})}
+=
+\widehat{\mu}
++
+\bigl(X_{n} - \widehat{\mu}\bigr)\,\widehat{\alpha}^{k}.
+\]
+
+Equivalently, we can write it **iteratively** as:
+
+\[
+X_{n+k+1}^{(\text{expected})}
+=
+\widehat{\alpha}\,X_{n+k}^{(\text{expected})}
++
+\bigl(1 - \widehat{\alpha}\bigr)\,\widehat{\mu}.
+\]
+
+No noise is added here, so this is the **mean path**. If you want random scenarios, you would sample around this mean using the OU distribution.
+
+---
+
+## 4. Summary
+
+1. **Estimate** \(\widehat{\alpha}\) from sample autocorrelation.  
+2. **Derive** \(\widehat{\lambda}\) using \(\widehat{\lambda} = -\frac{1}{\delta}\ln(\widehat{\alpha})\).  
+3. **Compute** \(\widehat{\mu}\) via linear regression of \(X_{i+1}\) on \(X_i\).  
+4. **Find** \(\widehat{\sigma}^2\) from the sum of squared residuals.  
+5. **Forecast** using \(\widehat{\alpha}^k\) or an iterative approach for the expected path.
+
+These steps align with the **maximum likelihood** estimation for Ornstein–Uhlenbeck parameters and provide a straightforward way to forecast the process.
