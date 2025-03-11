@@ -22,6 +22,9 @@ export class Visual implements IVisual {
     private sigmaHat: number = 0;
     private delta: number = 1;  // time step in ms
 
+    // Store current viewport dimensions.
+    private currentViewport: { width: number, height: number } = { width: 300, height: 200 };
+
     constructor(options: VisualConstructorOptions) {
         this.target = options.element;
         // Clear the target element.
@@ -32,15 +35,18 @@ export class Visual implements IVisual {
         sliderContainer.id = "slider-container";
         sliderContainer.style.display = "flex";
         sliderContainer.style.justifyContent = "space-around";
+        sliderContainer.style.alignItems = "center";
         sliderContainer.style.marginBottom = "10px";
         sliderContainer.innerHTML = `
             <div>
                 <label for="lambdaSlider">Lambda Factor:</label>
                 <input id="lambdaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+                <span id="lambdaValue">1.0</span>
             </div>
             <div>
                 <label for="sigmaSlider">Sigma Factor:</label>
                 <input id="sigmaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+                <span id="sigmaValue">1.0</span>
             </div>
         `;
         this.target.appendChild(sliderContainer);
@@ -66,13 +72,26 @@ export class Visual implements IVisual {
         }
 
         // Attach HTML slider event listeners.
-        document.getElementById("lambdaSlider")?.addEventListener("input", () => this.renderChart());
-        document.getElementById("sigmaSlider")?.addEventListener("input", () => this.renderChart());
+        // Update the displayed value and re-render the chart using stored viewport.
+        document.getElementById("lambdaSlider")?.addEventListener("input", (e: Event) => {
+            const input = e.target as HTMLInputElement;
+            document.getElementById("lambdaValue")!.innerText = input.value;
+            // Call renderChart using the stored viewport.
+            this.renderChart({ viewport: this.currentViewport } as VisualUpdateOptions);
+        });
+        document.getElementById("sigmaSlider")?.addEventListener("input", (e: Event) => {
+            const input = e.target as HTMLInputElement;
+            document.getElementById("sigmaValue")!.innerText = input.value;
+            this.renderChart({ viewport: this.currentViewport } as VisualUpdateOptions);
+        });
     }
 
     public update(options: VisualUpdateOptions) {
         const dataView: DataView = options.dataViews && options.dataViews[0];
         if (!dataView || !dataView.table) return;
+
+        // Update current viewport.
+        this.currentViewport = options.viewport;
 
         const tableRows = dataView.table.rows;
         if (!tableRows || tableRows.length === 0) return;
@@ -96,10 +115,10 @@ export class Visual implements IVisual {
         const firstTime = rawData[0].x.getTime();
         const lastTime = rawData[rawData.length - 1].x.getTime();
         this.delta = (lastTime - firstTime) / n;  // in ms
-        // Convert delta to days (used in OU parameter estimation).
+        // Convert delta to days for OU parameter estimation.
         const deltaDays = this.delta / (1000 * 60 * 60 * 24);
 
-        // Estimate OU parameters from the y-values.
+        // Estimate OU parameters from y-values.
         const yMean = d3.mean(rawData, d => d.y) as number;
         let numerator = 0, denominator = 0;
         for (let i = 0; i < n; i++) {
@@ -107,7 +126,7 @@ export class Visual implements IVisual {
             denominator += Math.pow(rawData[i].y - yMean, 2);
         }
         let alphaHat = numerator / denominator;
-        // Bound alphaHat to avoid issues.
+        // Bound alphaHat.
         alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
         this.lambdaHat = -Math.log(alphaHat) / deltaDays;
 
@@ -125,32 +144,34 @@ export class Visual implements IVisual {
         const sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
         this.sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
 
-        // Render the chart.
+        // Render the chart with the current viewport.
         this.renderChart(options);
     }
 
     private renderChart(options?: VisualUpdateOptions) {
         if (!this.data || this.data.length < 2) return;
 
-        // Get slider values.
+        // Use the stored viewport if options is not provided.
+        const viewport = options?.viewport || this.currentViewport;
+
+        // Get current slider values.
         const lambdaSlider = document.getElementById("lambdaSlider") as HTMLInputElement;
         const sigmaSlider = document.getElementById("sigmaSlider") as HTMLInputElement;
         const lambdaFactor = parseFloat(lambdaSlider.value);
         const sigmaFactor = parseFloat(sigmaSlider.value);
 
-        // Effective parameters.
+        // Compute effective parameters.
         const newLambda = this.lambdaHat * lambdaFactor;
         const newSigma = this.sigmaHat * sigmaFactor;
         const deltaDays = this.delta / (1000 * 60 * 60 * 24);
-        // Use deltaDays in the OU forecast.
         const alpha = Math.exp(-newLambda * deltaDays);
 
         // Clear previous SVG contents.
         this.svg.selectAll("*").remove();
 
         // Set SVG dimensions.
-        const width = options?.viewport.width || 300;
-        const height = options?.viewport.height || 200;
+        const width = viewport.width || 300;
+        const height = viewport.height || 200;
         this.svg.attr("width", width).attr("height", height);
         const innerWidth = width - this.margin.left - this.margin.right;
         const innerHeight = height - this.margin.top - this.margin.bottom;
@@ -164,7 +185,7 @@ export class Visual implements IVisual {
         const lastPoint = this.data[this.data.length - 1];
         let forecastPoints: { x: Date, mean: number, lower: number, upper: number }[] = [];
         for (let i = 1; i <= forecastSteps; i++) {
-            // Compute next x as a new Date by adding i * delta (in ms) to the last point.
+            // Compute next x by adding i * delta (in ms) to the last date.
             const nextX = new Date(lastPoint.x.getTime() + i * this.delta);
             const mean = this.muHat + (lastPoint.y - this.muHat) * Math.pow(alpha, i);
             const varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2 * i));
@@ -177,7 +198,7 @@ export class Visual implements IVisual {
         const forecastLowerLine = forecastPoints.map(d => ({ x: d.x, y: d.lower }));
         const forecastUpperLine = forecastPoints.map(d => ({ x: d.x, y: d.upper }));
 
-        // Combine x and y values from historical and forecast for scales.
+        // Combine x and y values for scales.
         const allX = this.data.map(d => d.x).concat(forecastMeanLine.map(d => d.x));
         const allY = this.data.map(d => d.y)
             .concat(forecastMeanLine.map(d => d.y))
@@ -206,7 +227,7 @@ export class Visual implements IVisual {
             .y(d => yScale(d.y))
             .curve(d3.curveMonotoneX);
 
-        // Draw historical data line (blue).
+        // Draw the historical data line (blue).
         g.append("path")
             .datum(this.data)
             .attr("fill", "none")
@@ -214,7 +235,7 @@ export class Visual implements IVisual {
             .attr("stroke-width", 2)
             .attr("d", lineGen);
 
-        // Draw forecast mean line (orange).
+        // Draw the forecast mean line (orange).
         g.append("path")
             .datum(forecastMeanLine)
             .attr("fill", "none")
