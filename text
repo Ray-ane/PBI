@@ -1,0 +1,11 @@
+# Setting up Your Environment for Power BI Visual Development
+
+Below are the basic commands you’ll need to get started developing a custom Power BI visual.
+
+1. **Install Node.js**  
+   Make sure you have [Node.js](https://nodejs.org/) installed on your system.
+
+2. **Install Power BI Visuals Tools**  
+   Open a terminal or command prompt and run:
+   ```bash
+   npm install -g powerbi-visuals-tools
