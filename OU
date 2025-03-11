@@ -1,26 +1,25 @@
 "use strict";
 
-// Power BI API imports
 import "core-js/stable";
 import "regenerator-runtime/runtime";
+import * as d3 from "d3";
 import * as powerbi from "powerbi-visuals-api";
 import DataView = powerbi.DataView;
+import IVisual = powerbi.extensibility.visual.IVisual;
+import VisualUpdateOptions = powerbi.extensibility.visual.VisualUpdateOptions;
 
-// Import D3
-import * as d3 from "d3";
-
-export class Visual implements powerbi.extensibility.visual.IVisual {
+export class Visual implements IVisual {
     private target: HTMLElement;
-    private svg: d3.Selection<SVGElement, unknown, null, undefined>;
+    private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
 
-    // Sliders for lambda and sigma scaling factors
+    // Sliders for lambda and sigma scaling factors.
     private lambdaSlider: d3.Selection<HTMLInputElement, unknown, null, undefined>;
     private sigmaSlider: d3.Selection<HTMLInputElement, unknown, null, undefined>;
 
-    // Chart margins
+    // Chart margins.
     private margin = { top: 70, right: 30, bottom: 40, left: 50 };
 
-    // Stored data and estimated parameters
+    // Stored data and estimated parameters.
     private data: { x: number, y: number }[] = [];
     private lambdaHat: number = 0;
     private muHat: number = 0;
@@ -30,16 +29,14 @@ export class Visual implements powerbi.extensibility.visual.IVisual {
     constructor(options: powerbi.extensibility.visual.VisualConstructorOptions) {
         this.target = options.element;
 
-        // Create the main SVG element for the chart
-        this.svg = d3
-            .select(this.target)
+        // Create the main SVG element.
+        this.svg = d3.select(this.target)
             .append("svg")
             .classed("ou-estimation-visual", true);
 
         // ---------------------------------------------------------------------
-        // Create the two sliders (for lambda and sigma scaling factors)
+        // Create two sliders (for λ and σ scaling factors) as HTML elements.
         // ---------------------------------------------------------------------
-        // Lambda slider
         this.lambdaSlider = d3.select(this.target)
             .append("input")
             .attr("type", "range")
@@ -58,7 +55,6 @@ export class Visual implements powerbi.extensibility.visual.IVisual {
             .style("top", "10px")
             .style("left", "130px");
 
-        // Sigma slider
         this.sigmaSlider = d3.select(this.target)
             .append("input")
             .attr("type", "range")
@@ -78,9 +74,9 @@ export class Visual implements powerbi.extensibility.visual.IVisual {
             .style("left", "340px");
 
         // ---------------------------------------------------------------------
-        // Create a tooltip div for showing details on hover
+        // Create a tooltip div for hover details.
         // ---------------------------------------------------------------------
-        if (d3.select(this.target).select(".tooltip").empty()) {
+        if (d3.select(this.target).select("div.tooltip").empty()) {
             d3.select(this.target)
               .append("div")
               .attr("class", "tooltip")
@@ -95,7 +91,7 @@ export class Visual implements powerbi.extensibility.visual.IVisual {
         }
 
         // ---------------------------------------------------------------------
-        // Attach slider event handlers to re-render the chart on input
+        // Attach slider event handlers to re-render the chart when sliders move.
         // ---------------------------------------------------------------------
         this.lambdaSlider.on("input", () => {
             this.renderChart();
@@ -105,43 +101,41 @@ export class Visual implements powerbi.extensibility.visual.IVisual {
         });
     }
 
-    /**
-     * Update method: Called when data or view size changes.
-     */
-    public update(options: powerbi.extensibility.visual.VisualUpdateOptions) {
+    public update(options: VisualUpdateOptions) {
         const dataView: DataView = options.dataViews && options.dataViews[0];
         if (!dataView || !dataView.table) {
             return;
         }
 
-        // 1) Parse the table data (assumes first column = x, second column = y)
+        // ---------------------------------------------------------------------
+        // 1. Parse the table data (assumes first column = x, second column = y).
+        // ---------------------------------------------------------------------
         let tableRows = dataView.table.rows;
         if (!tableRows || tableRows.length === 0) {
             return;
         }
 
         let rawData: { x: number, y: number }[] = [];
-        for (let row of tableRows) {
+        tableRows.forEach((row: any[]) => {
             let xVal = +row[0];
             let yVal = +row[1];
             if (!isNaN(xVal) && !isNaN(yVal)) {
                 rawData.push({ x: xVal, y: yVal });
             }
-        }
+        });
         rawData.sort((a, b) => a.x - b.x);
         this.data = rawData;
-
         if (rawData.length < 2) {
-            return; // Not enough data to estimate
+            return; // Not enough data.
         }
 
-        // 2) Estimate OU parameters from the historical data
+        // ---------------------------------------------------------------------
+        // 2. Estimate OU parameters from historical data.
+        // ---------------------------------------------------------------------
         let n = rawData.length - 1;
         this.delta = (rawData[rawData.length - 1].x - rawData[0].x) / n;
-
         let xMean = d3.mean(rawData, d => d.y) as number;
-        let numerator = 0;
-        let denominator = 0;
+        let numerator = 0, denominator = 0;
         for (let i = 0; i < n; i++) {
             numerator += (rawData[i + 1].y - xMean) * (rawData[i].y - xMean);
             denominator += Math.pow(rawData[i].y - xMean, 2);
@@ -164,53 +158,51 @@ export class Visual implements powerbi.extensibility.visual.IVisual {
         let sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
         this.sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
 
-        // 3) Render the chart with current parameters and slider factors
+        // ---------------------------------------------------------------------
+        // 3. Render the chart with current data and parameters.
+        // ---------------------------------------------------------------------
         this.renderChart(options);
     }
 
-    /**
-     * Renders the chart (historical data, forecast mean, forecast bands, tooltips)
-     */
-    private renderChart(options?: powerbi.extensibility.visual.VisualUpdateOptions) {
+    private renderChart(options?: VisualUpdateOptions) {
         if (!this.data || this.data.length < 2) {
             return;
         }
 
-        // Get current slider values to scale lambda and sigma
+        // Read current slider values.
         const lambdaFactor = parseFloat(this.lambdaSlider.property("value"));
         const sigmaFactor = parseFloat(this.sigmaSlider.property("value"));
 
-        // Effective parameters
+        // Effective parameters.
         const newLambda = this.lambdaHat * lambdaFactor;
         const newSigma = this.sigmaHat * sigmaFactor;
-        // For discrete OU, alpha = exp(-lambda * delta)
         const alpha = Math.exp(-newLambda * this.delta);
 
-        // Clear previous chart content
+        // Clear previous SVG contents.
         this.svg.selectAll("*").remove();
 
-        // Set up chart dimensions
-        let width = options?.viewport.width ?? 300;
-        let height = options?.viewport.height ?? 200;
+        // Use viewport dimensions if available; otherwise default.
+        let width = options?.viewport.width || 300;
+        let height = options?.viewport.height || 200;
         this.svg.attr("width", width).attr("height", height);
         let innerWidth = width - this.margin.left - this.margin.right;
         let innerHeight = height - this.margin.top - this.margin.bottom;
 
-        // Create chart group
+        // Create chart group.
         let g = this.svg.append("g")
             .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
 
         // ---------------------------------------------------------------------
-        // Forecast: Compute 50 future steps with mean, lower, and upper bands.
+        // 4. Forecast 50 steps ahead with 95% confidence bands.
         // ---------------------------------------------------------------------
         const forecastSteps = 50;
         let lastPoint = this.data[this.data.length - 1];
         let forecastPoints: { x: number, mean: number, lower: number, upper: number }[] = [];
-        // Use closed-form forecast: mean = μ + (last - μ)*alpha^i
-        // Variance = (σ²/(2λ)) * (1 - alpha^(2i))
         for (let i = 1; i <= forecastSteps; i++) {
             let nextX = lastPoint.x + i * this.delta;
+            // Mean forecast: μ + (X_last - μ)*α^i.
             let mean = this.muHat + (lastPoint.y - this.muHat) * Math.pow(alpha, i);
+            // Variance forecast: (σ²/(2λ))*(1 - α^(2i)).
             let varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2 * i));
             let stdDev = Math.sqrt(varForecast);
             let lower = mean - 1.96 * stdDev;
@@ -218,29 +210,33 @@ export class Visual implements powerbi.extensibility.visual.IVisual {
             forecastPoints.push({ x: nextX, mean: mean, lower: lower, upper: upper });
         }
 
-        // Create arrays for forecast mean, lower, and upper bands
+        // Prepare arrays for forecast mean, lower, and upper bands.
         let forecastMeanLine = forecastPoints.map(d => ({ x: d.x, y: d.mean }));
         let forecastLowerLine = forecastPoints.map(d => ({ x: d.x, y: d.lower }));
         let forecastUpperLine = forecastPoints.map(d => ({ x: d.x, y: d.upper }));
 
-        // Combine all data (historical and forecast) for scaling
-        let allData = this.data.concat(forecastMeanLine);
+        // Combine all points (including bands) to set the scales.
+        let allXData = this.data.map(d => d.x)
+            .concat(forecastMeanLine.map(d => d.x))
+            .concat(forecastLowerLine.map(d => d.x))
+            .concat(forecastUpperLine.map(d => d.x));
+        let allYData = this.data.map(d => d.y)
+            .concat(forecastMeanLine.map(d => d.y))
+            .concat(forecastLowerLine.map(d => d.y))
+            .concat(forecastUpperLine.map(d => d.y));
 
         // ---------------------------------------------------------------------
-        // Scales and Axes
+        // 5. Define scales and axes.
         // ---------------------------------------------------------------------
         let xScale = d3.scaleLinear()
-            .domain(d3.extent(allData, d => d.x) as [number, number])
+            .domain([d3.min(allXData) as number, d3.max(allXData) as number])
             .range([0, innerWidth]);
 
-        let yMin = d3.min(allData, d => d.y) || 0;
-        let yMax = d3.max(allData, d => d.y) || 0;
         let yScale = d3.scaleLinear()
-            .domain([yMin, yMax])
+            .domain([d3.min(allYData) as number, d3.max(allYData) as number])
             .range([innerHeight, 0])
             .nice();
 
-        // X-axis and Y-axis
         g.append("g")
             .attr("transform", `translate(0, ${innerHeight})`)
             .call(d3.axisBottom(xScale));
@@ -248,14 +244,14 @@ export class Visual implements powerbi.extensibility.visual.IVisual {
             .call(d3.axisLeft(yScale));
 
         // ---------------------------------------------------------------------
-        // Line generators for historical, forecast mean, and bands
+        // 6. Define line generators.
         // ---------------------------------------------------------------------
         let lineGen = d3.line<{ x: number; y: number }>()
             .x(d => xScale(d.x))
             .y(d => yScale(d.y))
             .curve(d3.curveMonotoneX);
 
-        // Historical data line (blue)
+        // Historical data line (blue).
         g.append("path")
             .datum(this.data)
             .attr("fill", "none")
@@ -263,7 +259,7 @@ export class Visual implements powerbi.extensibility.visual.IVisual {
             .attr("stroke-width", 2)
             .attr("d", lineGen);
 
-        // Forecast mean line (orange)
+        // Forecast mean line (orange).
         g.append("path")
             .datum(forecastMeanLine)
             .attr("fill", "none")
@@ -271,7 +267,7 @@ export class Visual implements powerbi.extensibility.visual.IVisual {
             .attr("stroke-width", 2)
             .attr("d", lineGen);
 
-        // Forecast lower band line (dashed grey)
+        // Forecast lower band line (dashed grey).
         g.append("path")
             .datum(forecastLowerLine)
             .attr("fill", "none")
@@ -280,7 +276,7 @@ export class Visual implements powerbi.extensibility.visual.IVisual {
             .style("stroke-dasharray", ("3, 3"))
             .attr("d", lineGen);
 
-        // Forecast upper band line (dashed grey)
+        // Forecast upper band line (dashed grey).
         g.append("path")
             .datum(forecastUpperLine)
             .attr("fill", "none")
@@ -290,10 +286,9 @@ export class Visual implements powerbi.extensibility.visual.IVisual {
             .attr("d", lineGen);
 
         // ---------------------------------------------------------------------
-        // Add circles along the forecast mean line for tooltips
+        // 7. Add forecast circles with tooltips.
         // ---------------------------------------------------------------------
-        let tooltip = d3.select(this.target).select(".tooltip");
-
+        let tooltip = d3.select(this.target).select("div.tooltip");
         g.selectAll("circle.forecast")
             .data(forecastMeanLine)
             .enter()
@@ -318,7 +313,7 @@ export class Visual implements powerbi.extensibility.visual.IVisual {
             });
 
         // ---------------------------------------------------------------------
-        // Display parameter estimates and current slider factors
+        // 8. Display parameter estimates and current slider factors.
         // ---------------------------------------------------------------------
         let paramStr = `μ = ${this.muHat.toFixed(2)}, λ = ${this.lambdaHat.toFixed(2)} (×${lambdaFactor}), σ = ${this.sigmaHat.toFixed(2)} (×${sigmaFactor})`;
         g.append("text")
