@@ -224,7 +224,7 @@ export class Visual implements IVisual {
             .y(d => yScale(d.y))
             .curve(d3.curveMonotoneX);
 
-        // Draw forecast confidence bands first (dashed grey).
+        // Draw the forecast confidence bands first (dashed grey).
         g.append("path")
             .datum(forecastLowerLine)
             .attr("fill", "none")
@@ -246,6 +246,7 @@ export class Visual implements IVisual {
             .attr("fill", "none")
             .attr("stroke", "orange")
             .attr("stroke-width", 2)
+            .style("stroke-dasharray", "0")
             .attr("d", lineGen);
 
         // Draw the historical data line (solid, color #00818F) on top.
@@ -254,6 +255,7 @@ export class Visual implements IVisual {
             .attr("fill", "none")
             .attr("stroke", "#00818F")
             .attr("stroke-width", 2)
+            .style("stroke-dasharray", "0")
             .attr("d", lineGen);
 
         // Add circles on historical data with tooltips.
