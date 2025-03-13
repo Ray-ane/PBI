@@ -1,147 +1,368 @@
-# Ornstein–Uhlenbeck (OU) Process: MLE Formulas and Forecasting
+"use strict";
+import "./../style/visual.less";
+import * as d3 from "d3";
+import powerbiVisualsApi from "powerbi-visuals-api";
+import IVisual = powerbiVisualsApi.extensibility.visual.IVisual;
+import VisualConstructorOptions = powerbiVisualsApi.extensibility.visual.VisualConstructorOptions;
+import VisualUpdateOptions = powerbiVisualsApi.extensibility.visual.VisualUpdateOptions;
+import DataView = powerbiVisualsApi.DataView;
 
-Below is a concise yet comprehensive set of formulas used for estimating an Ornstein–Uhlenbeck (OU) process in discrete time, along with explanations for each step. This covers:
+export class Visual implements IVisual {
+    private target: HTMLElement;
+    private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
 
-1. **Discrete-Time OU Approximation**  
-2. **Maximum Likelihood (ML) Parameter Estimation**  
-3. **Forecasting the Expected Future Path**
+    // Margins (with increased bottom margin for x‑axis labels)
+    private margin = { top: 20, right: 30, bottom: 50, left: 50 };
 
----
+    // Stored data and estimated parameters.
+    // We assume the input data is given as { x: Date, y: number }.
+    private data: { x: Date, y: number }[] = [];
+    private lambdaHat: number = 0;
+    private muHat: number = 0;
+    private sigmaHat: number = 0;
+    private delta: number = 1;  // time step in ms
 
-## 1. Discrete-Time Ornstein–Uhlenbeck Model
+    // Store current viewport dimensions.
+    private currentViewport: { width: number, height: number } = { width: 300, height: 200 };
 
-A continuous-time OU process is given by:
+    constructor(options: VisualConstructorOptions) {
+        this.target = options.element;
+        // Clear target element.
+        this.target.innerHTML = "";
 
-\[
-dX_t = \lambda \bigl(\mu - X_t\bigr)\,dt + \sigma\,dW_t,
-\]
+        // Create a container for HTML slider controls.
+        const sliderContainer = document.createElement("div");
+        sliderContainer.id = "slider-container";
+        sliderContainer.innerHTML = `
+            <div>
+                <label for="lambdaSlider">Lambda Factor:</label>
+                <input id="lambdaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+                <span id="lambdaValue">1.0</span>
+            </div>
+            <div>
+                <label for="sigmaSlider">Sigma Factor:</label>
+                <input id="sigmaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+                <span id="sigmaValue">1.0</span>
+            </div>
+        `;
+        this.target.appendChild(sliderContainer);
 
-where
+        // Create the SVG container.
+        this.svg = d3.select(this.target)
+            .append("svg")
+            .classed("ou-estimation-visual", true);
 
-- \(\mu\) is the long-term mean,
-- \(\lambda > 0\) is the mean-reversion rate,
-- \(\sigma > 0\) is the volatility parameter,
-- \(W_t\) is a standard Wiener process.
+        // Create a tooltip div.
+        if (d3.select(this.target).select("div.tooltip").empty()) {
+            d3.select(this.target)
+              .append("div")
+              .attr("class", "tooltip")
+              .style("position", "absolute")
+              .style("pointer-events", "none")
+              .style("opacity", "0")
+              .style("background", "#fff")
+              .style("border", "1px solid #ccc")
+              .style("padding", "5px")
+              .style("border-radius", "3px")
+              .style("font-size", "12px");
+        }
 
-When **observing** the process at discrete times \(t_i = i\,\delta\) (with \(\delta\) constant), we can write:
+        // Attach slider event listeners.
+        document.getElementById("lambdaSlider")?.addEventListener("input", (e: Event) => {
+            const input = e.target as HTMLInputElement;
+            document.getElementById("lambdaValue")!.innerText = input.value;
+            this.renderChart({ viewport: this.currentViewport } as VisualUpdateOptions);
+        });
+        document.getElementById("sigmaSlider")?.addEventListener("input", (e: Event) => {
+            const input = e.target as HTMLInputElement;
+            document.getElementById("sigmaValue")!.innerText = input.value;
+            this.renderChart({ viewport: this.currentViewport } as VisualUpdateOptions);
+        });
+    }
 
-\[
-X_{i+1} 
-= 
-\alpha\,X_i 
-+ 
-(1 - \alpha)\,\mu 
-+ 
-\text{noise},
-\quad
-\text{where}
-\quad
-\alpha = e^{-\lambda\,\delta}.
-\]
+    public update(options: VisualUpdateOptions) {
+        const dataView: DataView = options.dataViews && options.dataViews[0];
+        if (!dataView || !dataView.table) return;
 
-The noise term is normally distributed with variance 
-\(\frac{\sigma^2}{2\lambda}\bigl(1-e^{-2\lambda \delta}\bigr)\), but for MLE derivation, we focus on the mean relationship.
+        // Update current viewport.
+        this.currentViewport = options.viewport;
 
----
+        const tableRows = dataView.table.rows;
+        if (!tableRows || tableRows.length === 0) return;
 
-## 2. Maximum Likelihood Parameter Estimation
+        // Parse data: assume first column is date and second column is measure.
+        let rawData: { x: Date, y: number }[] = [];
+        tableRows.forEach((row: any[]) => {
+            const xVal = new Date(row[0]);
+            const yVal = +row[1];
+            if (!isNaN(xVal.getTime()) && !isNaN(yVal)) {
+                rawData.push({ x: xVal, y: yVal });
+            }
+        });
+        // Sort by date.
+        rawData.sort((a, b) => a.x.getTime() - b.x.getTime());
+        this.data = rawData;
+        if (rawData.length < 2) return;
 
-Given **\(n+1\)** observations \(\{X_0, X_1, \dots, X_n\}\) at times \(\{0,\delta,2\delta,\dots,n\delta\}\), we can estimate \(\alpha\), \(\lambda\), \(\mu\), and \(\sigma^2\) by **maximizing** the Gaussian log-likelihood implied by the discrete-time model.
+        // Perform ADF test on the series.
+        const yValues = rawData.map(d => d.y);
+        if (!this.performADFTest(yValues)) {
+            // If series is non-stationary, display a message and do not apply the OU process.
+            this.svg.selectAll("*").remove();
+            this.svg
+              .append("text")
+              .attr("x", 10)
+              .attr("y", 30)
+              .attr("fill", "red")
+              .style("font-size", "14px")
+              .text("Time series non-stationary. OU process not applied.");
+            return;
+        }
 
-### 2.1 Estimating \(\alpha\)
+        // Compute time step (delta) in ms.
+        const n = rawData.length - 1;
+        const firstTime = rawData[0].x.getTime();
+        const lastTime = rawData[rawData.length - 1].x.getTime();
+        this.delta = (lastTime - firstTime) / n;
+        const deltaDays = this.delta / (1000 * 60 * 60 * 24);
 
-Let \(\bar{X} = \frac{1}{n+1}\sum_{i=0}^{n} X_i\). Then:
+        // Estimate OU parameters from y-values.
+        const yMean = d3.mean(rawData, d => d.y) as number;
+        let numerator = 0, denominator = 0;
+        for (let i = 0; i < n; i++) {
+            numerator += (rawData[i+1].y - yMean) * (rawData[i].y - yMean);
+            denominator += Math.pow(rawData[i].y - yMean, 2);
+        }
+        let alphaHat = numerator / denominator;
+        alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
+        this.lambdaHat = -Math.log(alphaHat) / deltaDays;
 
-\[
-\widehat{\alpha}
-=
-\frac{\sum_{i=0}^{n-1} (X_{i+1} - \bar{X})(X_{i} - \bar{X})}
-     {\sum_{i=0}^{n-1} (X_{i} - \bar{X})^2}.
-\]
+        let sumResidual = 0;
+        for (let i = 0; i < n; i++) {
+            sumResidual += rawData[i+1].y - alphaHat * rawData[i].y;
+        }
+        this.muHat = sumResidual / (n * (1 - alphaHat));
 
-> **Intuition**: \(\alpha\) is essentially the sample lag-1 autocorrelation after centering the data.
+        let sumSq = 0;
+        for (let i = 0; i < n; i++) {
+            const r = rawData[i+1].y - alphaHat * rawData[i].y - (1 - alphaHat) * this.muHat;
+            sumSq += r * r;
+        }
+        const sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
+        this.sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
 
-### 2.2 Estimating \(\lambda\)
+        // Render the chart.
+        this.renderChart(options);
+    }
 
-Recall \(\alpha = e^{-\lambda \delta}\). Hence:
+    // Basic ADF Test (without additional lags)
+    // Returns true if the test statistic is below the critical value (indicating stationarity).
+    private performADFTest(data: number[]): boolean {
+        const n = data.length;
+        if(n < 3) return false;
+        // Compute first differences and lagged values.
+        let dX: number[] = [];
+        let lagX: number[] = [];
+        for(let i = 1; i < n; i++){
+            dX.push(data[i] - data[i-1]);
+            lagX.push(data[i-1]);
+        }
+        const m = dX.length;
+        const meanLag = d3.mean(lagX)!;
+        const meandX = d3.mean(dX)!;
+        let num = 0, den = 0;
+        for(let i = 0; i < m; i++){
+            num += (lagX[i] - meanLag) * (dX[i] - meandX);
+            den += Math.pow(lagX[i] - meanLag, 2);
+        }
+        const slope = num / den;
+        const intercept = meandX - slope * meanLag;
+        let ssr = 0;
+        for(let i = 0; i < m; i++){
+            const pred = intercept + slope * lagX[i];
+            ssr += Math.pow(dX[i] - pred, 2);
+        }
+        const s2 = ssr / (m - 2);
+        const se = Math.sqrt(s2 / den);
+        const tStat = slope / se;
+        // A typical critical value at the 5% level (for large samples) is around -3.
+        return tStat < -3;
+    }
 
-\[
-\widehat{\lambda}
-=
--\frac{1}{\delta} \ln(\widehat{\alpha}).
-\]
+    private renderChart(options?: VisualUpdateOptions) {
+        if (!this.data || this.data.length < 2) return;
+        const viewport = options?.viewport || this.currentViewport;
+        const lambdaSlider = document.getElementById("lambdaSlider") as HTMLInputElement;
+        const sigmaSlider = document.getElementById("sigmaSlider") as HTMLInputElement;
+        const lambdaFactor = parseFloat(lambdaSlider.value);
+        const sigmaFactor = parseFloat(sigmaSlider.value);
+        const newLambda = this.lambdaHat * lambdaFactor;
+        const newSigma = this.sigmaHat * sigmaFactor;
+        const deltaDays = this.delta / (1000 * 60 * 60 * 24);
+        const alpha = Math.exp(-newLambda * deltaDays);
 
-### 2.3 Estimating \(\mu\)
+        this.svg.selectAll("*").remove();
+        const width = viewport.width || 300;
+        const height = viewport.height || 200;
+        this.svg.attr("width", width).attr("height", height);
+        const innerWidth = width - this.margin.left - this.margin.right;
+        const innerHeight = height - this.margin.top - this.margin.bottom;
 
-From the discrete-time model \(X_{i+1} = \alpha\,X_i + (1-\alpha)\,\mu + \dots\), we get:
+        const g = this.svg.append("g")
+            .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
 
-\[
-\widehat{\mu}
-=
-\frac{\sum_{i=0}^{n-1} \bigl(X_{i+1} - \widehat{\alpha}\,X_i\bigr)}
-     {n\,\bigl(1 - \widehat{\alpha}\bigr)}.
-\]
+        // Forecast 50 steps ahead.
+        const forecastSteps = 50;
+        const lastPoint = this.data[this.data.length - 1];
+        let forecastPoints: { x: Date, mean: number, lower: number, upper: number }[] = [];
+        for (let i = 1; i <= forecastSteps; i++) {
+            const nextX = new Date(lastPoint.x.getTime() + i * this.delta);
+            const mean = this.muHat + (lastPoint.y - this.muHat) * Math.pow(alpha, i);
+            const varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2 * i));
+            const stdDev = Math.sqrt(varForecast);
+            const lower = mean - 1.96 * stdDev;
+            const upper = mean + 1.96 * stdDev;
+            forecastPoints.push({ x: nextX, mean, lower, upper });
+        }
+        const forecastMeanLine = forecastPoints.map(d => ({ x: d.x, y: d.mean }));
+        const forecastLowerLine = forecastPoints.map(d => ({ x: d.x, y: d.lower }));
+        const forecastUpperLine = forecastPoints.map(d => ({ x: d.x, y: d.upper }));
 
-### 2.4 Estimating \(\sigma^2\)
+        // Combine historical and forecast data for scales.
+        const allX = this.data.map(d => d.x).concat(forecastMeanLine.map(d => d.x));
+        const allY = this.data.map(d => d.y)
+            .concat(forecastMeanLine.map(d => d.y))
+            .concat(forecastLowerLine.map(d => d.y))
+            .concat(forecastUpperLine.map(d => d.y));
 
-Define the residual:
+        const xScale = d3.scaleTime()
+            .domain([d3.min(allX) as Date, d3.max(allX) as Date])
+            .range([0, innerWidth]);
+        const yScale = d3.scaleLinear()
+            .domain([d3.min(allY) as number, d3.max(allY) as number])
+            .range([innerHeight, 0])
+            .nice();
 
-\[
-\text{residual}_i 
-= 
-X_{i+1} 
-- 
-\widehat{\alpha}\,X_i 
-- 
-\bigl(1 - \widehat{\alpha}\bigr)\,\widehat{\mu}.
-\]
+        // Dynamically determine tick count.
+        const tickCount = Math.max(2, Math.floor(innerWidth / 80));
+        const xAxis = d3.axisBottom(xScale)
+            .ticks(tickCount)
+            .tickFormat(d3.timeFormat("%b %d, %Y"));
+        const xAxisGroup = g.append("g")
+            .attr("transform", `translate(0, ${innerHeight})`)
+            .call(xAxis);
+        if (innerWidth < 300) {
+            xAxisGroup.selectAll("text")
+                .attr("transform", "rotate(-45)")
+                .style("text-anchor", "end");
+        }
+        g.append("g").call(d3.axisLeft(yScale));
 
-Then:
+        const lineGen = d3.line<{ x: Date, y: number }>()
+            .x(d => xScale(d.x))
+            .y(d => yScale(d.y))
+            .curve(d3.curveMonotoneX);
 
-\[
-\widehat{\sigma}^2
-=
-\frac{2\,\widehat{\lambda}}{\,1-\widehat{\alpha}^2\,}
-\times
-\frac{1}{n}
-\sum_{i=0}^{n-1}
-\bigl(\text{residual}_i\bigr)^2.
-\]
+        // Draw forecast confidence bands (dashed grey).
+        g.append("path")
+            .datum(forecastLowerLine)
+            .attr("fill", "none")
+            .attr("stroke", "grey")
+            .attr("stroke-width", 1)
+            .style("stroke-dasharray", "3,3")
+            .attr("d", lineGen);
+        g.append("path")
+            .datum(forecastUpperLine)
+            .attr("fill", "none")
+            .attr("stroke", "grey")
+            .attr("stroke-width", 1)
+            .style("stroke-dasharray", "3,3")
+            .attr("d", lineGen);
 
----
+        // Draw forecast mean line (solid orange).
+        g.append("path")
+            .datum(forecastMeanLine)
+            .attr("fill", "none")
+            .attr("stroke", "orange")
+            .attr("stroke-width", 2)
+            .style("stroke-dasharray", "0")
+            .attr("d", lineGen);
 
-## 3. Forecasting the Expected Future Path
+        // Draw historical data line (solid, color #00818F).
+        g.append("path")
+            .datum(this.data)
+            .attr("fill", "none")
+            .attr("stroke", "#00818F")
+            .attr("stroke-width", 2)
+            .style("stroke-dasharray", "0")
+            .attr("d", lineGen);
 
-Once we have \(\widehat{\alpha} = e^{-\widehat{\lambda}\,\delta}\) and \(\widehat{\mu}\), the **mean** forecast for **\(k\) steps** into the future (beyond \(X_n\)) is:
+        // Invisible circles for tooltips (historical).
+        g.selectAll("circle.historical")
+            .data(this.data)
+            .enter()
+            .append("circle")
+            .attr("class", "historical")
+            .attr("cx", d => xScale(d.x))
+            .attr("cy", d => yScale(d.y))
+            .attr("r", 5)
+            .attr("fill", "transparent")
+            .attr("stroke", "none")
+            .style("pointer-events", "all")
+            .on("mouseover", (event, d) => {
+                d3.select(this.target).select("div.tooltip")
+                    .transition().duration(200).style("opacity", 0.9);
+                d3.select(this.target).select("div.tooltip")
+                    .html(`Date: ${d.x.toLocaleDateString()}<br>Value: ${d.y.toFixed(2)}`)
+                    .style("left", (event.pageX + 5) + "px")
+                    .style("top", (event.pageY - 28) + "px");
+            })
+            .on("mousemove", (event, d) => {
+                d3.select(this.target).select("div.tooltip")
+                    .style("left", (event.pageX + 5) + "px")
+                    .style("top", (event.pageY - 28) + "px");
+            })
+            .on("mouseout", () => {
+                d3.select(this.target).select("div.tooltip")
+                    .transition().duration(500).style("opacity", 0);
+            });
 
-\[
-X_{n+k}^{(\text{expected})}
-=
-\widehat{\mu}
-+
-\bigl(X_{n} - \widehat{\mu}\bigr)\,\widehat{\alpha}^{k}.
-\]
+        // Invisible circles for tooltips (forecast).
+        g.selectAll("circle.forecast")
+            .data(forecastMeanLine)
+            .enter()
+            .append("circle")
+            .attr("class", "forecast")
+            .attr("cx", d => xScale(d.x))
+            .attr("cy", d => yScale(d.y))
+            .attr("r", 5)
+            .attr("fill", "transparent")
+            .attr("stroke", "none")
+            .style("pointer-events", "all")
+            .on("mouseover", (event, d) => {
+                d3.select(this.target).select("div.tooltip")
+                    .transition().duration(200).style("opacity", 0.9);
+                d3.select(this.target).select("div.tooltip")
+                    .html(`Date: ${d.x.toLocaleDateString()}<br>Mean: ${d.y.toFixed(2)}`)
+                    .style("left", (event.pageX + 5) + "px")
+                    .style("top", (event.pageY - 28) + "px");
+            })
+            .on("mousemove", (event, d) => {
+                d3.select(this.target).select("div.tooltip")
+                    .style("left", (event.pageX + 5) + "px")
+                    .style("top", (event.pageY - 28) + "px");
+            })
+            .on("mouseout", () => {
+                d3.select(this.target).select("div.tooltip")
+                    .transition().duration(500).style("opacity", 0);
+            });
 
-Equivalently, we can write it **iteratively** as:
-
-\[
-X_{n+k+1}^{(\text{expected})}
-=
-\widehat{\alpha}\,X_{n+k}^{(\text{expected})}
-+
-\bigl(1 - \widehat{\alpha}\bigr)\,\widehat{\mu}.
-\]
-
-No noise is added here, so this is the **mean path**. If you want random scenarios, you would sample around this mean using the OU distribution.
-
----
-
-## 4. Summary
-
-1. **Estimate** \(\widehat{\alpha}\) from sample autocorrelation.  
-2. **Derive** \(\widehat{\lambda}\) using \(\widehat{\lambda} = -\frac{1}{\delta}\ln(\widehat{\alpha})\).  
-3. **Compute** \(\widehat{\mu}\) via linear regression of \(X_{i+1}\) on \(X_i\).  
-4. **Find** \(\widehat{\sigma}^2\) from the sum of squared residuals.  
-5. **Forecast** using \(\widehat{\alpha}^k\) or an iterative approach for the expected path.
-
-These steps align with the **maximum likelihood** estimation for Ornstein–Uhlenbeck parameters and provide a straightforward way to forecast the process.
+        // Display parameter estimates above the chart.
+        g.append("text")
+            .attr("x", 10)
+            .attr("y", -10)
+            .attr("fill", "#333")
+            .style("font-size", "12px")
+            .text(`μ = ${this.muHat.toFixed(2)}, λ = ${this.lambdaHat.toFixed(2)} (×${lambdaFactor}), σ = ${this.sigmaHat.toFixed(2)} (×${sigmaFactor})`);
+    }
+}
