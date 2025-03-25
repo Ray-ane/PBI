@@ -2,3 +2,6 @@ df_label = pd.concat([
     df_pairs[['Date','Bond1']].assign(side='cheap').rename(columns={'Bond1': 'isin'}),
     df_pairs[['Date','Bond2']].assign(side='rich').rename(columns={'Bond2': 'isin'})
 ], ignore_index=True)
+
+
+df_error = df_error.merge(df_label, on=['Date','isin'], how='left')
