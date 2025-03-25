@@ -1,16 +1,20 @@
-LastKnownValue = 
-VAR LastDate = 
-    CALCULATE(
-        MAX('Table'[Date]),
-        FILTER(
-            'Table',
-            NOT(ISBLANK('Table'[Value])) && 
-            'Table'[Category] = SELECTEDVALUE('Table'[Category])
-        )
-    )
-RETURN
-    CALCULATE(
-        MAX('Table'[Value]),
-        'Table'[Date] = LastDate,
-        'Table'[Category] = SELECTEDVALUE('Table'[Category])
-    )
+"dataViewMappings": [
+  {
+    "table": {
+      "rows": {
+        "select": [
+          {
+            "for": {
+              "in": "dataset"
+            }
+          }
+        ],
+        "dataReductionAlgorithm": {
+          "top": {
+            "count": 30000
+          }
+        }
+      }
+    }
+  }
+]
