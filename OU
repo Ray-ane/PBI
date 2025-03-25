@@ -8,8 +8,14 @@ import VisualUpdateOptions = powerbiVisualsApi.extensibility.visual.VisualUpdate
 import DataView = powerbiVisualsApi.DataView;
 
 /**
- * The data schema based on your new columns:
- *  inputdate, context1, isin1, isin2, bond1, bond2, error
+ * New Data Schema:
+ * - inputdate: Date
+ * - context1: string
+ * - isin1: string
+ * - isin2: string
+ * - bond1: string
+ * - bond2: string
+ * - error: number
  */
 interface DataRow {
     inputdate: Date;
@@ -21,7 +27,7 @@ interface DataRow {
     error: number;
 }
 
-/** A simple interface for a row of the difference series. */
+/** Interface for difference series point */
 interface DiffPoint {
     inputdate: Date;
     diff: number;
@@ -29,35 +35,30 @@ interface DiffPoint {
 
 export class Visual implements IVisual {
     private target: HTMLElement;
-
-    // A single dropdown for pairs (isin1||isin2).
+    // Single dropdown for pair selection (isin1||isin2)
     private dropdownPairs: HTMLSelectElement;
-
-    // We'll store the entire dataset after parsing.
+    // All data from Power BI
     private allData: DataRow[] = [];
-
-    // The difference time series we compute for the selected pair.
+    // The difference series computed for the selected pair
     private diffSeries: DiffPoint[] = [];
-
     // Chart margins
     private margin = { top: 20, right: 30, bottom: 50, left: 50 };
-
-    // OU parameters if stationary
+    // OU parameters (computed from diff series if stationarity holds)
     private lambdaHat: number = 0;
     private muHat: number = 0;
     private sigmaHat: number = 0;
-
-    // For rendering the chart
+    // SVG container for the chart
     private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
-
-    // We'll store the current viewport size
+    // Current viewport dimensions
     private currentViewport: { width: number, height: number } = { width: 300, height: 200 };
+    // Flag for stationarity (result of ADF test)
+    private isStationary: boolean = false;
 
     constructor(options: VisualConstructorOptions) {
         this.target = options.element;
         this.target.innerHTML = "";
 
-        // Create a container for the dropdown
+        // Create control container with a single dropdown.
         const controlContainer = document.createElement("div");
         controlContainer.id = "control-container";
         controlContainer.innerHTML = `
@@ -66,34 +67,27 @@ export class Visual implements IVisual {
         `;
         this.target.appendChild(controlContainer);
 
-        // Grab reference to the dropdown
         this.dropdownPairs = document.getElementById("pairDropdown") as HTMLSelectElement;
         this.dropdownPairs.addEventListener("change", () => {
-            // When user selects a pair, compute the difference time series and update chart
+            console.log("Dropdown changed. Selected pair:", this.dropdownPairs.value);
             this.computeDiffAndRender();
         });
 
-        // Create an SVG for the chart
+        // Create the SVG container for the chart.
         this.svg = d3.select(this.target)
             .append("svg")
             .classed("diff-chart", true);
     }
 
-    /**
-     * The main update method called when the data or view size changes.
-     */
     public update(options: VisualUpdateOptions) {
         const dataView: DataView = options.dataViews && options.dataViews[0];
-        if(!dataView || !dataView.table) return;
-
+        if (!dataView || !dataView.table) return;
         this.currentViewport = options.viewport || { width: 300, height: 200 };
 
+        // Parse the dataset.
         const rows = dataView.table.rows;
-        if(!rows || rows.length === 0) {
-            return;
-        }
+        if (!rows || rows.length === 0) return;
 
-        // 1) Parse the dataset
         let parsed: DataRow[] = [];
         rows.forEach((row: any[]) => {
             const dateVal = new Date(row[0]);
@@ -102,9 +96,9 @@ export class Visual implements IVisual {
             const isin2 = row[3]?.toString() || "";
             const bond1 = row[4]?.toString() || "";
             const bond2 = row[5]?.toString() || "";
-            const errVal = +row[6];
+            const err = +row[6];
 
-            if(!isNaN(dateVal.getTime()) && context1 && isin1 && isin2 && bond1 && bond2 && !isNaN(errVal)) {
+            if (!isNaN(dateVal.getTime()) && context1 && isin1 && isin2 && bond1 && bond2 && !isNaN(err)) {
                 parsed.push({
                     inputdate: dateVal,
                     context1,
@@ -112,320 +106,217 @@ export class Visual implements IVisual {
                     isin2,
                     bond1,
                     bond2,
-                    error: errVal
+                    error: err
                 });
             }
         });
-        // Sort by date ascending
+        console.log("Parsed Data:", parsed);
         parsed.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
         this.allData = parsed;
 
-        // 2) Identify the latest inputdate among rows where context1 == "P_VALUE"
+        // Get rows where context1 is "P_VALUE" for pair extraction.
         const pValueRows = parsed.filter(d => d.context1 === "P_VALUE");
-        if(pValueRows.length === 0) {
-            // No pairs to show
+        console.log("P_VALUE Rows:", pValueRows);
+        if (pValueRows.length === 0) {
             this.dropdownPairs.options.length = 0;
             this.svg.selectAll("*").remove();
             return;
         }
         const latestDate = d3.max(pValueRows, d => d.inputdate)!;
-        const latestRows = pValueRows.filter(d => d.inputdate.getTime() === latestDate.getTime());
+        console.log("Latest P_VALUE Date:", latestDate);
+        const latestRows = pValueRows.filter(d => d.inputdate.toDateString() === latestDate.toDateString());
+        console.log("Latest P_VALUE Rows:", latestRows);
 
-        // 3) Collect all unique pairs from those rows
+        // Build unique pairs (using isin1 and isin2) from latestRows.
         const pairSet = new Set<string>();
         latestRows.forEach(row => {
             const pairKey = `${row.isin1}||${row.isin2}`;
             pairSet.add(pairKey);
         });
         const uniquePairs = Array.from(pairSet);
+        console.log("Unique Pairs:", uniquePairs);
 
-        // 4) Populate the dropdown
-        this.dropdownPairs.options.length = 0; // clear existing
+        // Populate dropdown.
+        this.dropdownPairs.options.length = 0;
         uniquePairs.forEach(pk => {
             const opt = document.createElement("option");
             opt.value = pk;
             opt.text = pk;
             this.dropdownPairs.appendChild(opt);
         });
-
-        // 5) By default, we can pick the first pair if any
         if(uniquePairs.length > 0) {
             this.dropdownPairs.value = uniquePairs[0];
         }
 
-        // 6) Compute the difference time series for the selected pair and render
+        // Compute difference series and render.
         this.computeDiffAndRender();
     }
 
     /**
-     * Gathers the time series for the two bonds from rows with context1 == "ERROR",
-     * aligns them by date, computes the difference, then checks stationarity and
-     * possibly estimates OU parameters for forecast.
+     * Compute the difference time series for the selected pair.
+     * Performs day-level matching (using toDateString()).
      */
     private computeDiffAndRender() {
-        if(!this.allData || this.allData.length === 0) return;
-        if(this.dropdownPairs.options.length === 0) return;
+        if (!this.allData || this.allData.length === 0) return;
+        if (this.dropdownPairs.options.length === 0) return;
 
         const selectedPair = this.dropdownPairs.value;
-        if(!selectedPair) return;
+        if (!selectedPair) return;
         const [selectedIsin1, selectedIsin2] = selectedPair.split("||");
+        console.log("Selected Pair:", selectedIsin1, selectedIsin2);
 
-        // 1) Filter rows with context1 == "ERROR"
+        // Filter rows where context1 is "ERROR"
         const errorRows = this.allData.filter(d => d.context1 === "ERROR");
+        console.log("ERROR Rows:", errorRows);
 
-        // 2) Time series for bond1 => d.isin1 == selectedIsin1
-        //    Time series for bond2 => d.isin1 == selectedIsin2
-        //    (If you prefer matching by bond1 or bond2, adjust accordingly.)
-        const bond1Rows = errorRows.filter(d => d.isin1 === selectedIsin1);
-        const bond2Rows = errorRows.filter(d => d.isin1 === selectedIsin2);
+        // Build maps for each bond using day-level key.
+        const mapBond1 = new Map<string, number>(); // key = date.toDateString()
+        errorRows.filter(d => d.isin1 === selectedIsin1)
+            .forEach(d => {
+                const key = d.inputdate.toDateString();
+                mapBond1.set(key, d.error);
+            });
+        const mapBond2 = new Map<string, number>();
+        errorRows.filter(d => d.isin1 === selectedIsin2)
+            .forEach(d => {
+                const key = d.inputdate.toDateString();
+                mapBond2.set(key, d.error);
+            });
+        console.log("Bond1 Map:", mapBond1);
+        console.log("Bond2 Map:", mapBond2);
 
-        // 3) Build a map of date -> error for each bond
-        const mapBond1 = new Map<number, number>();
-        bond1Rows.forEach(r => {
-            mapBond1.set(r.inputdate.getTime(), r.error);
-        });
-        const mapBond2 = new Map<number, number>();
-        bond2Rows.forEach(r => {
-            mapBond2.set(r.inputdate.getTime(), r.error);
-        });
-
-        // 4) Compute the difference series over the intersection of dates
+        // Compute the difference series using the intersection of dates (by day).
         let diffSeries: DiffPoint[] = [];
-        mapBond1.forEach((val1, timeKey) => {
-            if(mapBond2.has(timeKey)) {
-                const val2 = mapBond2.get(timeKey)!;
+        mapBond1.forEach((val1, key) => {
+            if (mapBond2.has(key)) {
+                const val2 = mapBond2.get(key)!;
                 diffSeries.push({
-                    inputdate: new Date(timeKey),
+                    inputdate: new Date(key),
                     diff: val1 - val2
                 });
             }
         });
         diffSeries.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
+        console.log("Difference Series:", diffSeries);
         this.diffSeries = diffSeries;
 
-        // 5) Apply ADF test
         if(diffSeries.length < 2) {
-            // Not enough data to do anything
+            console.log("Not enough overlapping data for difference series.");
             this.renderDiffChart(false);
             return;
         }
+
+        // Apply ADF test on the difference values.
         const diffs = diffSeries.map(d => d.diff);
-        const isStationary = this.performADFTest(diffs);
+        this.isStationary = this.performADFTest(diffs);
+        console.log("ADF Test Stationary?", this.isStationary);
 
-        // If stationary, estimate OU parameters & forecast
-        if(isStationary) {
-            this.estimateOUParams(diffs, diffSeries);
-        }
-
-        // 6) Render the chart with or without OU forecast
-        this.renderDiffChart(isStationary);
+        // If stationary, OU process can be applied. (You can add further OU estimation/forecast logic here.)
+        // For now, we simply render the difference chart with a message if non-stationary.
+        this.renderDiffChart(this.isStationary);
     }
 
     /**
-     * A simple ADF test (no extra lags). Returns true if tStat < -3 => stationary.
+     * A basic ADF test implementation (no extra lags).
+     * Returns true if the t-statistic < -3 (stationary).
      */
     private performADFTest(data: number[]): boolean {
-        if(data.length < 3) return false;
+        if (data.length < 3) return false;
         let dX: number[] = [];
         let lagX: number[] = [];
-        for(let i=1; i<data.length; i++){
+        for (let i = 1; i < data.length; i++) {
             dX.push(data[i] - data[i-1]);
             lagX.push(data[i-1]);
         }
         const m = dX.length;
         const meanLag = d3.mean(lagX)!;
         const meanDX = d3.mean(dX)!;
-        let numerator = 0, denominator = 0;
-        for(let i=0; i<m; i++){
-            numerator += (lagX[i] - meanLag)*(dX[i] - meanDX);
-            denominator += Math.pow(lagX[i] - meanLag, 2);
+        let num = 0, den = 0;
+        for (let i = 0; i < m; i++) {
+            num += (lagX[i] - meanLag) * (dX[i] - meanDX);
+            den += Math.pow(lagX[i] - meanLag, 2);
         }
-        const slope = numerator / denominator;
-        // Residual variance
+        const slope = num / den;
         let ssr = 0;
-        for(let i=0; i<m; i++){
+        for (let i = 0; i < m; i++) {
             const pred = slope * lagX[i];
             ssr += Math.pow(dX[i] - pred, 2);
         }
-        const s2 = ssr / (m-2);
-        const se = Math.sqrt(s2/denominator);
+        const s2 = ssr / (m - 2);
+        const se = Math.sqrt(s2 / den);
         const tStat = slope / se;
+        console.log("ADF t-statistic:", tStat);
         return tStat < -3;
     }
 
     /**
-     * Estimate OU parameters (alpha -> lambda, mu, sigma) from the difference series.
-     * For simplicity, we do not incorporate any slider scaling here, but you can adapt
-     * from previous code if you want to multiply lambda and sigma.
-     */
-    private estimateOUParams(diffValues: number[], diffSeries: DiffPoint[]) {
-        const n = diffValues.length - 1;
-        const meanDiff = d3.mean(diffValues)!;
-        let num = 0, den = 0;
-        for(let i=0; i<n; i++){
-            num += (diffValues[i+1] - meanDiff)*(diffValues[i] - meanDiff);
-            den += Math.pow(diffValues[i] - meanDiff, 2);
-        }
-        let alphaHat = num/den;
-        alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
-
-        // Time step based on date
-        const firstTime = diffSeries[0].inputdate.getTime();
-        const lastTime = diffSeries[diffSeries.length-1].inputdate.getTime();
-        const nSteps = diffSeries.length - 1;
-        const delta = (lastTime - firstTime)/nSteps; // ms
-        const deltaDays = delta/(1000*60*60*24);
-
-        this.lambdaHat = -Math.log(alphaHat)/deltaDays;
-
-        let sumResidual = 0;
-        for(let i=0; i<n; i++){
-            sumResidual += (diffValues[i+1] - alphaHat*diffValues[i]);
-        }
-        this.muHat = sumResidual/(n*(1-alphaHat));
-
-        let sumSq = 0;
-        for(let i=0; i<n; i++){
-            const r = diffValues[i+1] - alphaHat*diffValues[i] - (1-alphaHat)*this.muHat;
-            sumSq += r*r;
-        }
-        const sigmaSq = (2*this.lambdaHat)/(1 - alphaHat*alphaHat)*(1/n)*sumSq;
-        this.sigmaHat = Math.sqrt(Math.max(sigmaSq, 0));
-    }
-
-    /**
-     * Renders the difference chart. If isStationary = true, we also draw a forecast line
-     * using the OU parameters.
+     * Renders the difference chart. If OU process was applied (isStationary true),
+     * you could add forecast logic. For now, we simply draw the historical difference line.
      */
     private renderDiffChart(isStationary: boolean) {
-        // Clear the SVG
+        // Clear the SVG.
         this.svg.selectAll("*").remove();
 
         const width = this.currentViewport.width || 300;
         const height = this.currentViewport.height || 200;
         this.svg.attr("width", width).attr("height", height);
-
         const innerWidth = width - this.margin.left - this.margin.right;
         const innerHeight = height - this.margin.top - this.margin.bottom;
 
         const g = this.svg.append("g")
             .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
 
-        if(this.diffSeries.length < 1) {
-            g.append("text")
-             .attr("x", 10)
-             .attr("y", 30)
-             .attr("fill", "red")
-             .style("font-size", "14px")
-             .text("No data to display.");
-            return;
-        }
-
-        // Build x scale from the date range
+        // Build x scale from diffSeries dates.
         const xScale = d3.scaleTime()
             .domain([this.diffSeries[0].inputdate, this.diffSeries[this.diffSeries.length-1].inputdate])
             .range([0, innerWidth]);
 
-        // Build y scale from the min/max of the difference
-        const allDiff = this.diffSeries.map(d => d.diff);
-        let minVal = d3.min(allDiff)!;
-        let maxVal = d3.max(allDiff)!;
-
-        // If stationary and we do a forecast, we might extend in future => next 50 steps
-        let forecastData: DiffPoint[] = [];
-        if(isStationary) {
-            // Create a forecast series
-            const lastDiff = this.diffSeries[this.diffSeries.length - 1].diff;
-            const lastDate = this.diffSeries[this.diffSeries.length - 1].inputdate;
-            const forecastSteps = 20; // e.g. 20 future steps
-            const nSteps = this.diffSeries.length - 1;
-            const firstTime = this.diffSeries[0].inputdate.getTime();
-            const lastTime = lastDate.getTime();
-            const delta = (lastTime - firstTime)/nSteps; // ms per step
-            // alpha = e^{-lambdaHat * deltaDays}
-            const deltaDays = delta/(1000*60*60*24);
-            const alpha = Math.exp(-this.lambdaHat*deltaDays);
-
-            for(let i=1; i<=forecastSteps; i++){
-                const nextTime = lastTime + i*delta;
-                const meanForecast = this.muHat + (lastDiff - this.muHat)*Math.pow(alpha, i);
-                forecastData.push({
-                    inputdate: new Date(nextTime),
-                    diff: meanForecast
-                });
-            }
-            // Expand the domain
-            const forecastDiffs = forecastData.map(d => d.diff);
-            const newMin = d3.min(forecastDiffs);
-            const newMax = d3.max(forecastDiffs);
-            if(newMin !== undefined && newMin < minVal) minVal = newMin;
-            if(newMax !== undefined && newMax > maxVal) maxVal = newMax;
-        }
-
-        // y scale
+        // Build y scale from diff values.
+        const allDiffs = this.diffSeries.map(d => d.diff);
         const yScale = d3.scaleLinear()
-            .domain([minVal, maxVal])
+            .domain([d3.min(allDiffs) as number, d3.max(allDiffs) as number])
             .range([innerHeight, 0])
             .nice();
 
-        // x-axis
+        // Draw axes.
         g.append("g")
             .attr("transform", `translate(0, ${innerHeight})`)
             .call(d3.axisBottom(xScale).tickFormat(d3.timeFormat("%b %d, %Y")));
-        // y-axis
         g.append("g")
             .call(d3.axisLeft(yScale));
 
-        // Build a line generator
+        // Create a line generator.
         const lineGen = d3.line<DiffPoint>()
             .x(d => xScale(d.inputdate))
             .y(d => yScale(d.diff))
             .curve(d3.curveMonotoneX);
 
-        // Draw the historical difference line
+        // Draw the historical difference line.
         g.append("path")
             .datum(this.diffSeries)
             .attr("fill", "none")
             .attr("stroke", "#1f77b4")
             .attr("stroke-width", 2)
+            .style("stroke-dasharray", "0")
             .attr("d", lineGen);
 
         if(isStationary) {
-            // Draw the forecast line
-            g.append("path")
-                .datum(forecastData)
-                .attr("fill", "none")
-                .attr("stroke", "orange")
-                .attr("stroke-width", 2)
-                .attr("d", lineGen);
-        } else {
-            // Show a message that it's non-stationary
+            // Optionally: Add OU forecast line here if desired.
             g.append("text")
-             .attr("x", 10)
-             .attr("y", 20)
-             .attr("fill", "red")
-             .style("font-size", "12px")
-             .text("Non-stationary (ADF test failed) => no OU forecast");
+              .attr("x", innerWidth/2)
+              .attr("y", 15)
+              .attr("text-anchor", "middle")
+              .style("fill", "green")
+              .style("font-size", "12px")
+              .text("ADF test passed: Series is stationary. OU process can be applied.");
+        } else {
+            g.append("text")
+              .attr("x", innerWidth/2)
+              .attr("y", 15)
+              .attr("text-anchor", "middle")
+              .style("fill", "red")
+              .style("font-size", "12px")
+              .text("ADF test failed: Series is non-stationary. OU process not applied.");
         }
-
-        // Optionally add invisible circles for hover tooltips on the historical line
-        g.selectAll("circle.diff")
-            .data(this.diffSeries)
-            .enter()
-            .append("circle")
-            .attr("cx", d => xScale(d.inputdate))
-            .attr("cy", d => yScale(d.diff))
-            .attr("r", 3)
-            .attr("fill", "transparent")
-            .style("pointer-events", "all")
-            .on("mouseover", (event, d) => {
-                // show tooltip
-            })
-            .on("mousemove", (event, d) => {
-                // move tooltip
-            })
-            .on("mouseout", () => {
-                // hide tooltip
-            });
     }
 }
