@@ -7,6 +7,7 @@ import VisualConstructorOptions = powerbiVisualsApi.extensibility.visual.VisualC
 import VisualUpdateOptions = powerbiVisualsApi.extensibility.visual.VisualUpdateOptions;
 import DataView = powerbiVisualsApi.DataView;
 
+// Update the data interface to include isin1 and isin2.
 interface DataRow {
     date: Date;
     bondCheap: string;
@@ -15,6 +16,8 @@ interface DataRow {
     errorBondRich: number;
     zSpreadBondCheap: number;
     zSpreadBondRich: number;
+    isin1: string;
+    isin2: string;
 }
 
 interface DiffPoint {
@@ -27,14 +30,14 @@ export class Visual implements IVisual {
     // Two SVGs for Chart 1 (OU on diff series) and Chart 2 (dual-line for ZSpreads)
     private svgChart1: d3.Selection<SVGSVGElement, unknown, null, undefined>;
     private svgChart2: d3.Selection<SVGSVGElement, unknown, null, undefined>;
-
+    
     // Margins for charts.
     private margin = { top: 20, right: 20, bottom: 50, left: 50 };
 
     // Global data.
     private data: DataRow[] = [];
 
-    // OU parameters computed from Chart1 (diff series).
+    // OU parameters computed from Chart 1 (difference series).
     private lambdaHat: number = 0;
     private muHat: number = 0;
     private sigmaHat: number = 0;
@@ -143,7 +146,7 @@ export class Visual implements IVisual {
         if (!dataView || !dataView.table) return;
         this.currentViewport = options.viewport;
 
-        // Reset the sliders to 1.0 on external filtering.
+        // Reset the lambda and sigma sliders to default (1.0) on external filtering.
         this.lambdaSlider.value = "1.0";
         this.sigmaSlider.value = "1.0";
         (document.getElementById("lambdaValue") as HTMLElement).innerText = "1.0";
@@ -152,7 +155,6 @@ export class Visual implements IVisual {
         const tableRows = dataView.table.rows;
         if (!tableRows || tableRows.length === 0) return;
 
-        // Parse data rows.
         let rawData: DataRow[] = [];
         tableRows.forEach((row: any[]) => {
             const xVal = new Date(row[0]);
@@ -162,6 +164,8 @@ export class Visual implements IVisual {
             const errorBondRich = +row[4];
             const zSpreadBondCheap = +row[5];
             const zSpreadBondRich = +row[6];
+            const isin1 = row[7] ? row[7].toString() : "";
+            const isin2 = row[8] ? row[8].toString() : "";
             if (!isNaN(xVal.getTime()) && bondCheap && bondRich &&
                 !isNaN(errorBondCheap) && !isNaN(errorBondRich) &&
                 !isNaN(zSpreadBondCheap) && !isNaN(zSpreadBondRich)) {
@@ -172,35 +176,38 @@ export class Visual implements IVisual {
                     errorBondCheap,
                     errorBondRich,
                     zSpreadBondCheap,
-                    zSpreadBondRich
+                    zSpreadBondRich,
+                    isin1,
+                    isin2
                 });
             }
         });
-        // Sort by date.
+        // Sort data by date.
         rawData.sort((a, b) => a.date.getTime() - b.date.getTime());
         this.data = rawData;
 
-        // Populate the dropdowns with unique asset names if not already populated.
+        // Populate dropdowns if not already filled.
         this.populateDropdown(this.dropdownBondCheap, rawData.map(d => d.bondCheap));
         this.populateDropdown(this.dropdownBondRich, rawData.map(d => d.bondRich));
 
         // Filter data by dropdown selection.
         const selectedBondCheap = this.dropdownBondCheap.value;
         const selectedBondRich = this.dropdownBondRich.value;
-        const filteredData = rawData.filter(d =>
+        const filteredData = rawData.filter(d => 
             d.bondCheap === selectedBondCheap && d.bondRich === selectedBondRich
         );
         if (filteredData.length < 2) {
             d3.select("#chart1").selectAll("*").remove();
             d3.select("#chart2").selectAll("*").remove();
-            d3.select("#chart1").append("div").style("color", "red")
+            d3.select("#chart1")
+              .append("div")
+              .style("color", "red")
               .text("Insufficient data for selected bonds.");
             return;
         }
-        // Use filtered data.
         this.data = filteredData;
 
-        // Compute time step (delta) from dates.
+        // Compute time step (delta) in milliseconds.
         const n = filteredData.length - 1;
         const firstTime = filteredData[0].date.getTime();
         const lastTime = filteredData[filteredData.length - 1].date.getTime();
@@ -208,7 +215,6 @@ export class Visual implements IVisual {
         const deltaDays = this.delta / (1000 * 60 * 60 * 24);
 
         // -------- Chart 1: Difference Series (with OU process and ADF Test) --------
-        // Compute diff = ZSpread Bond cheap - ZSpread Bond rich.
         const diffData: DiffPoint[] = filteredData.map(d => ({
             date: d.date,
             diff: d.zSpreadBondCheap - d.zSpreadBondRich
@@ -217,9 +223,6 @@ export class Visual implements IVisual {
         // Perform ADF test on diff series.
         const diffValues = diffData.map(d => d.diff);
         this.diffSeriesStationary = this.performADFTest(diffValues);
-
-        // If non-stationary, we will not apply OU process.
-        // (We will show a message in Chart 1.)
 
         // -------- Update Charts --------
         this.updateCharts();
@@ -238,12 +241,11 @@ export class Visual implements IVisual {
         }
     }
 
-    // A basic ADF Test (without additional lag terms) on a numeric array.
-    // Returns true if the test statistic is below -3 (rejecting non-stationarity).
+    // Basic ADF Test (without additional lag terms).
+    // Returns true if t-statistic < -3 (i.e. rejects non-stationarity).
     private performADFTest(data: number[]): boolean {
         const n = data.length;
         if(n < 3) return false;
-        // Compute first differences and lagged values.
         let dX: number[] = [];
         let lagX: number[] = [];
         for(let i = 1; i < n; i++){
@@ -259,7 +261,6 @@ export class Visual implements IVisual {
             den += Math.pow(lagX[i] - meanLag, 2);
         }
         const slope = num / den;
-        // Compute residuals for standard error.
         let ssr = 0;
         for(let i = 0; i < m; i++){
             const pred = slope * lagX[i];
@@ -268,11 +269,10 @@ export class Visual implements IVisual {
         const s2 = ssr / (m - 2);
         const se = Math.sqrt(s2 / den);
         const tStat = slope / se;
-        // For large samples, a typical 5% critical value is around -3.
         return tStat < -3;
     }
 
-    // Draw the two charts.
+    // Draw both charts.
     private updateCharts() {
         // Set dimensions.
         const totalWidth = this.currentViewport.width || 600;
@@ -291,13 +291,12 @@ export class Visual implements IVisual {
         const g1 = svg1.append("g")
             .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
 
-        // X scale based on dates.
+        // X scale for Chart 1.
         const allDates = this.data.map(d => d.date);
         const xScale1 = d3.scaleTime()
             .domain([d3.min(allDates) as Date, d3.max(allDates) as Date])
             .range([0, chartWidth]);
 
-        // If the diff series is stationary (passes ADF), apply OU process.
         if(this.diffSeriesStationary) {
             // Compute OU parameters on diff series.
             const n = this.data.length - 1;
@@ -310,7 +309,6 @@ export class Visual implements IVisual {
             }
             let alphaHat = num / den;
             alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
-            // Use delta in days.
             const firstTime = this.data[0].date.getTime();
             const lastTime = this.data[this.data.length-1].date.getTime();
             const delta = (lastTime - firstTime) / n;
@@ -336,7 +334,7 @@ export class Visual implements IVisual {
             const newSigma = this.sigmaHat * sigmaFactor;
             const alpha = Math.exp(-newLambda * deltaDays);
 
-            // Prepare extended data: forecast 50 steps ahead.
+            // Prepare extended diff data: forecast 50 steps ahead.
             const diffData: DiffPoint[] = this.data.map(d => ({
                 date: d.date,
                 diff: d.zSpreadBondCheap - d.zSpreadBondRich
@@ -347,23 +345,17 @@ export class Visual implements IVisual {
             for(let i = 1; i <= forecastSteps; i++){
                 const nextDate = new Date(this.data[this.data.length-1].date.getTime() + i * delta);
                 const meanForecast = this.muHat + (lastDiff - this.muHat) * Math.pow(alpha, i);
-                // Confidence intervals:
-                const varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2*i));
-                const stdDev = Math.sqrt(varForecast);
                 forecastPoints.push({ date: nextDate, diff: meanForecast });
-                // For simplicity, we do not plot the confidence bands here,
-                // but you could compute lower/upper bands as needed.
             }
             const forecastLine = diffData.concat(forecastPoints);
 
-            // Y scale for Chart 1 based on difference.
+            // Y scale for Chart 1.
             const allDiffs = forecastLine.map(d => d.diff);
             const yScale1 = d3.scaleLinear()
                 .domain([d3.min(allDiffs) as number, d3.max(allDiffs) as number])
                 .range([chartHeight, 0])
                 .nice();
 
-            // X-axis for Chart1.
             g1.append("g")
               .attr("transform", `translate(0, ${chartHeight})`)
               .call(d3.axisBottom(xScale1).tickFormat(d3.timeFormat("%b %d, %Y")));
@@ -381,19 +373,16 @@ export class Visual implements IVisual {
                 .attr("fill", "none")
                 .attr("stroke", "#00818F")
                 .attr("stroke-width", 2)
-                .style("stroke-dasharray", "0")
                 .attr("d", lineGen1);
-
-            // Draw forecast line.
+            // Draw forecast diff line.
             g1.append("path")
                 .datum(forecastPoints)
                 .attr("fill", "none")
                 .attr("stroke", "orange")
                 .attr("stroke-width", 2)
-                .style("stroke-dasharray", "0")
                 .attr("d", lineGen1);
 
-            // Optionally add invisible circles for tooltips on Chart 1.
+            // Invisible circles for tooltips on Chart 1.
             g1.selectAll("circle.diff")
                 .data(diffData)
                 .enter()
@@ -420,8 +409,6 @@ export class Visual implements IVisual {
                     d3.select(this.target).select("div.tooltip")
                       .transition().duration(500).style("opacity", 0);
                 });
-
-            // Add title for Chart 1.
             g1.append("text")
                 .attr("x", chartWidth / 2)
                 .attr("y", -5)
@@ -429,14 +416,7 @@ export class Visual implements IVisual {
                 .style("font-size", "14px")
                 .text("OU Forecast on ZSpread Diff (Bond cheap - Bond rich)");
         } else {
-            // If non-stationary, display a warning message.
-            g1.append("text")
-                .attr("x", 10)
-                .attr("y", 30)
-                .attr("fill", "red")
-                .style("font-size", "14px")
-                .text("Time series non-stationary. OU process not applied.");
-            // Also, draw the historical diff line (without OU forecast) for reference.
+            // If non-stationary, display warning.
             const diffData = this.data.map(d => ({
                 date: d.date,
                 diff: d.zSpreadBondCheap - d.zSpreadBondRich
@@ -448,6 +428,8 @@ export class Visual implements IVisual {
                 .domain([d3.min(diffData, d => d.diff) as number, d3.max(diffData, d => d.diff) as number])
                 .range([chartHeight, 0])
                 .nice();
+            const g1 = this.svgChart1.append("g")
+                .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
             g1.append("g")
               .attr("transform", `translate(0, ${chartHeight})`)
               .call(d3.axisBottom(xScale1).tickFormat(d3.timeFormat("%b %d, %Y")));
@@ -478,7 +460,7 @@ export class Visual implements IVisual {
         const g2 = svg2.append("g")
             .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
 
-        // Prepare two series: Bond cheap and Bond rich.
+        // Prepare series for Bond cheap and Bond rich.
         const seriesCheap = this.data.map(d => ({
             date: d.date,
             value: d.zSpreadBondCheap
@@ -488,50 +470,99 @@ export class Visual implements IVisual {
             value: d.zSpreadBondRich
         }));
 
-        // Use common x-scale.
         const xScale2 = d3.scaleTime()
             .domain([d3.min(this.data, d => d.date) as Date, d3.max(this.data, d => d.date) as Date])
             .range([0, chartWidth]);
-        // Y scale for Chart 2 based on combined ZSpread values.
         const allZ = this.data.map(d => d.zSpreadBondCheap).concat(this.data.map(d => d.zSpreadBondRich));
         const yScale2 = d3.scaleLinear()
             .domain([d3.min(allZ) as number, d3.max(allZ) as number])
             .range([chartHeight, 0])
             .nice();
 
-        // Append axes.
         g2.append("g")
             .attr("transform", `translate(0, ${chartHeight})`)
             .call(d3.axisBottom(xScale2).tickFormat(d3.timeFormat("%b %d, %Y")));
-        g2.append("g")
-            .call(d3.axisLeft(yScale2));
+        g2.append("g").call(d3.axisLeft(yScale2));
 
-        // Create line generator for Chart 2.
         const lineGen2 = d3.line<{ date: Date, value: number }>()
             .x(d => xScale2(d.date))
             .y(d => yScale2(d.value))
             .curve(d3.curveMonotoneX);
 
-        // Draw Bond cheap line.
         g2.append("path")
             .datum(seriesCheap)
             .attr("fill", "none")
             .attr("stroke", "#00818F")
             .attr("stroke-width", 2)
             .attr("d", lineGen2);
-        // Draw Bond rich line.
         g2.append("path")
             .datum(seriesRich)
             .attr("fill", "none")
             .attr("stroke", "orange")
             .attr("stroke-width", 2)
             .attr("d", lineGen2);
-        // Add titles.
         g2.append("text")
             .attr("x", chartWidth / 2)
             .attr("y", -5)
             .attr("text-anchor", "middle")
             .style("font-size", "14px")
             .text("ZSpread: Bond cheap vs Bond rich");
+
+        // Optional: Invisible circles for tooltips in Chart 2.
+        g2.selectAll("circle.cheap")
+            .data(seriesCheap)
+            .enter()
+            .append("circle")
+            .attr("class", "cheap")
+            .attr("cx", d => xScale2(d.date))
+            .attr("cy", d => yScale2(d.value))
+            .attr("r", 5)
+            .attr("fill", "transparent")
+            .style("pointer-events", "all")
+            .on("mouseover", (event, d) => {
+                d3.select(this.target).select("div.tooltip")
+                  .transition().duration(200).style("opacity", 0.9);
+                d3.select(this.target).select("div.tooltip")
+                  .html(`Date: ${d.date.toLocaleDateString()}<br>Bond cheap: ${d.value.toFixed(2)}`)
+                  .style("left", (event.pageX + 5) + "px")
+                  .style("top", (event.pageY - 28) + "px");
+            })
+            .on("mousemove", (event, d) => {
+                d3.select(this.target).select("div.tooltip")
+                  .style("left", (event.pageX + 5) + "px")
+                  .style("top", (event.pageY - 28) + "px");
+            })
+            .on("mouseout", () => {
+                d3.select(this.target).select("div.tooltip")
+                  .transition().duration(500).style("opacity", 0);
+            });
+
+        g2.selectAll("circle.rich")
+            .data(seriesRich)
+            .enter()
+            .append("circle")
+            .attr("class", "rich")
+            .attr("cx", d => xScale2(d.date))
+            .attr("cy", d => yScale2(d.value))
+            .attr("r", 5)
+            .attr("fill", "transparent")
+            .style("pointer-events", "all")
+            .on("mouseover", (event, d) => {
+                d3.select(this.target).select("div.tooltip")
+                  .transition().duration(200).style("opacity", 0.9);
+                d3.select(this.target).select("div.tooltip")
+                  .html(`Date: ${d.date.toLocaleDateString()}<br>Bond rich: ${d.value.toFixed(2)}`)
+                  .style("left", (event.pageX + 5) + "px")
+                  .style("top", (event.pageY - 28) + "px");
+            })
+            .on("mousemove", (event, d) => {
+                d3.select(this.target).select("div.tooltip")
+                  .style("left", (event.pageX + 5) + "px")
+                  .style("top", (event.pageY - 28) + "px");
+            })
+            .on("mouseout", () => {
+                d3.select(this.target).select("div.tooltip")
+                  .transition().duration(500).style("opacity", 0);
+            });
     }
 }
