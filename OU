@@ -9,7 +9,7 @@ import DataView = powerbiVisualsApi.DataView;
 
 /**
  * Data schema:
- *  inputdate, context1, isin1, isin2, bond1, bond2, error
+ *  inputdate, context1, isin1, isin2, Bond1, Bond2, Error
  */
 interface DataRow {
     inputdate: Date;
@@ -21,7 +21,7 @@ interface DataRow {
     error: number;
 }
 
-/** A difference point for the ERROR series. */
+/** Interface for a difference point (for the ERROR diff series). */
 interface DiffPoint {
     inputdate: Date;
     diff: number;
@@ -29,49 +29,94 @@ interface DiffPoint {
 
 export class Visual implements IVisual {
     private target: HTMLElement;
-    // Single dropdown for pair selection.
+    // Dropdown for pair selection (formatted as "isin1||isin2")
     private dropdownPairs: HTMLSelectElement;
-    // Store the full dataset.
+    // All parsed data.
     private allData: DataRow[] = [];
     // Computed difference series for the selected pair.
     private diffSeries: DiffPoint[] = [];
-    // Chart margins.
-    private margin = { top: 20, right: 30, bottom: 50, left: 50 };
-    // OU parameters computed from the diff series.
+    // OU parameters (estimated from the diff series if stationary)
     private lambdaHat: number = 0;
     private muHat: number = 0;
     private sigmaHat: number = 0;
-    // SVG container for Chart 1.
-    private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
+    // Time step (in ms) computed from the time series.
+    private delta: number = 1;
+    // Two SVGs: Chart 1 (OU process on diff series) and Chart 2 (dual-line chart for error series)
+    private svgChart1: d3.Selection<SVGSVGElement, unknown, null, undefined>;
+    private svgChart2: d3.Selection<SVGSVGElement, unknown, null, undefined>;
+    // Chart margins.
+    private margin = { top: 20, right: 30, bottom: 50, left: 50 };
+    // OU scaling sliders (for lambda and sigma).
+    private lambdaSlider: HTMLInputElement;
+    private sigmaSlider: HTMLInputElement;
     // Current viewport dimensions.
     private currentViewport: { width: number, height: number } = { width: 600, height: 300 };
-    // Flag indicating if the diff series passed the ADF test.
-    private isStationary: boolean = false;
+    // Flag indicating if the diff series passes the ADF test.
+    private diffSeriesStationary: boolean = false;
 
     constructor(options: VisualConstructorOptions) {
         this.target = options.element;
         this.target.innerHTML = "";
 
-        // Create a container for the dropdown.
+        // Create a container for controls (dropdown and sliders).
         const controlContainer = document.createElement("div");
         controlContainer.id = "control-container";
         controlContainer.innerHTML = `
-            <label for="pairDropdown">Select Pair (isin1||isin2):</label>
-            <select id="pairDropdown"></select>
+          <div id="dropdown-container">
+              <label for="pairDropdown">Select Pair (isin1||isin2):</label>
+              <select id="pairDropdown"></select>
+          </div>
+          <div id="slider-container">
+              <div>
+                  <label for="lambdaSlider">Lambda Factor:</label>
+                  <input id="lambdaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+                  <span id="lambdaValue">1.0</span>
+              </div>
+              <div>
+                  <label for="sigmaSlider">Sigma Factor:</label>
+                  <input id="sigmaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+                  <span id="sigmaValue">1.0</span>
+              </div>
+          </div>
         `;
         this.target.appendChild(controlContainer);
 
-        // Reference the dropdown and listen to changes.
+        // Get control references.
         this.dropdownPairs = document.getElementById("pairDropdown") as HTMLSelectElement;
+        this.lambdaSlider = document.getElementById("lambdaSlider") as HTMLInputElement;
+        this.sigmaSlider = document.getElementById("sigmaSlider") as HTMLInputElement;
+        this.lambdaSlider.addEventListener("input", () => {
+            (document.getElementById("lambdaValue") as HTMLElement).innerText = this.lambdaSlider.value;
+            this.updateCharts();
+        });
+        this.sigmaSlider.addEventListener("input", () => {
+            (document.getElementById("sigmaValue") as HTMLElement).innerText = this.sigmaSlider.value;
+            this.updateCharts();
+        });
         this.dropdownPairs.addEventListener("change", () => {
             console.log("Dropdown changed. Selected pair:", this.dropdownPairs.value);
             this.computeDiffAndRender();
         });
 
-        // Create the SVG container for the chart.
-        this.svg = d3.select(this.target)
-            .append("svg")
-            .classed("diff-chart", true);
+        // Create container for two charts (side-by-side).
+        const chartsContainer = document.createElement("div");
+        chartsContainer.id = "charts-container";
+        chartsContainer.style.display = "flex";
+        chartsContainer.style.justifyContent = "space-between";
+        const chart1Div = document.createElement("div");
+        chart1Div.id = "chart1";
+        chart1Div.style.flex = "1";
+        chart1Div.style.marginRight = "10px";
+        const chart2Div = document.createElement("div");
+        chart2Div.id = "chart2";
+        chart2Div.style.flex = "1";
+        chartsContainer.appendChild(chart1Div);
+        chartsContainer.appendChild(chart2Div);
+        this.target.appendChild(chartsContainer);
+
+        // Create SVGs for each chart.
+        this.svgChart1 = d3.select(chart1Div).append("svg").classed("chart1", true);
+        this.svgChart2 = d3.select(chart2Div).append("svg").classed("chart2", true);
 
         // Create a tooltip container.
         if (d3.select(this.target).select("div.tooltip").empty()) {
@@ -94,13 +139,18 @@ export class Visual implements IVisual {
         if (!dataView || !dataView.table) return;
         this.currentViewport = options.viewport || { width: 600, height: 300 };
 
-        // Parse rows.
+        // Reset sliders to 1.0 on external filtering.
+        this.lambdaSlider.value = "1.0";
+        this.sigmaSlider.value = "1.0";
+        (document.getElementById("lambdaValue") as HTMLElement).innerText = "1.0";
+        (document.getElementById("sigmaValue") as HTMLElement).innerText = "1.0";
+
         const rows = dataView.table.rows;
         if (!rows || rows.length === 0) return;
 
+        // Parse data—note: we no longer filter out any row.
         let parsed: DataRow[] = [];
         rows.forEach((row: any[]) => {
-            // Removed strict checking to avoid filtering out rows.
             const dateVal = new Date(row[0]);
             const context1 = row[1] ? row[1].toString() : "";
             const isin1 = row[2] ? row[2].toString() : "";
@@ -122,23 +172,23 @@ export class Visual implements IVisual {
         parsed.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
         this.allData = parsed;
 
-        // Get rows where context1 is "P_VALUE" (using trim and uppercase).
+        // Get rows where context1 is "P_VALUE" (using trim/uppercase).
         const pValueRows = parsed.filter(d => d.context1.trim().toUpperCase() === "P_VALUE");
         console.log("P_VALUE Rows:", pValueRows);
         if (pValueRows.length === 0) {
             this.dropdownPairs.options.length = 0;
-            this.svg.selectAll("*").remove();
+            this.svgChart1.selectAll("*").remove();
+            this.svgChart2.selectAll("*").remove();
             return;
         }
-
-        // Identify the latest date among P_VALUE rows (day-level).
+        // Determine latest date (by day) among P_VALUE rows.
         const maxDateMs = d3.max(pValueRows, d => d.inputdate.getTime())!;
         const maxDateObj = new Date(maxDateMs);
         console.log("Latest P_VALUE Date:", maxDateObj);
         const latestRows = pValueRows.filter(d => d.inputdate.toDateString() === maxDateObj.toDateString());
         console.log("Latest P_VALUE Rows (same day):", latestRows);
 
-        // Build unique pairs from latestRows.
+        // Build unique pairs from latestRows (using isin1 and isin2).
         const pairSet = new Set<string>();
         latestRows.forEach(row => {
             const pairKey = `${row.isin1}||${row.isin2}`;
@@ -159,28 +209,30 @@ export class Visual implements IVisual {
             this.dropdownPairs.value = uniquePairs[0];
         }
 
-        // Compute the difference series and render.
-        this.computeDiffAndRender();
+        // For this version, we use the filtered data from ERROR context for charting.
+        // (In this V2 upgrade, we assume that the P_VALUE rows are only used for pair extraction,
+        //  and ERROR rows are used for time series.)
+        this.updateCharts();
     }
 
     /**
-     * Computes the difference series from rows where context1 is "ERROR".
-     * Matching is done at day-level (using toDateString()).
+     * This method filters ERROR rows (normalized), builds two error series for the selected pair,
+     * aligns them at the day level (using toDateString()), and computes the difference series.
+     * Then it applies the ADF test and (if stationary) estimates OU parameters and forecast.
      */
-    private computeDiffAndRender() {
-        if (!this.allData || this.allData.length === 0) return;
+    private updateCharts() {
+        // Get the selected pair from the dropdown.
         if (this.dropdownPairs.options.length === 0) return;
-
         const selectedPair = this.dropdownPairs.value;
         if (!selectedPair) return;
         const [selectedIsin1, selectedIsin2] = selectedPair.split("||");
         console.log("Selected Pair:", selectedIsin1, selectedIsin2);
 
-        // Filter rows with context1 == "ERROR" (using trim/uppercase).
+        // Filter rows with context1 == "ERROR" (normalized).
         const errorRows = this.allData.filter(d => d.context1.trim().toUpperCase() === "ERROR");
         console.log("ERROR Rows:", errorRows);
 
-        // Build maps for each bond, using day-level key.
+        // Build maps for each bond using day-level keys.
         const mapBond1 = new Map<string, number>();
         errorRows.filter(d => d.isin1.trim() === selectedIsin1.trim())
             .forEach(d => {
@@ -196,13 +248,13 @@ export class Visual implements IVisual {
         console.log("Bond1 Map:", mapBond1);
         console.log("Bond2 Map:", mapBond2);
 
-        // Build the difference series (for dates present in both maps).
+        // Build the difference series: diff = error (Bond1) - error (Bond2)
         let diffSeries: DiffPoint[] = [];
-        mapBond1.forEach((val1, dayKey) => {
-            if (mapBond2.has(dayKey)) {
-                const val2 = mapBond2.get(dayKey)!;
+        mapBond1.forEach((val1, key) => {
+            if (mapBond2.has(key)) {
+                const val2 = mapBond2.get(key)!;
                 diffSeries.push({
-                    inputdate: new Date(dayKey),
+                    inputdate: new Date(key),
                     diff: val1 - val2
                 });
             }
@@ -210,24 +262,28 @@ export class Visual implements IVisual {
         diffSeries.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
         console.log("Difference Series:", diffSeries);
         this.diffSeries = diffSeries;
+
         if (diffSeries.length < 2) {
             console.log("Not enough overlapping data for difference series.");
             this.renderDiffChart(false);
             return;
         }
 
-        // Apply the ADF test on the difference values.
+        // Apply ADF test on the difference values.
         const diffs = diffSeries.map(d => d.diff);
-        this.isStationary = this.performADFTest(diffs);
-        console.log("ADF Test Stationary?", this.isStationary);
+        const adfResult = this.performADFTest(diffs);
+        this.diffSeriesStationary = adfResult;
+        console.log("ADF Test Stationary?", adfResult);
 
-        // Render the chart.
-        this.renderDiffChart(this.isStationary);
+        // Render the two charts:
+        // Chart 1: Difference series with OU process forecast (if stationary)
+        // Chart 2: Dual-line chart for ERROR series for each bond.
+        this.renderDiffChart(this.diffSeriesStationary);
+        this.renderDualChart(selectedIsin1, selectedIsin2);
     }
 
     /**
-     * A basic ADF test implementation (no extra lags).
-     * Returns true if the t-statistic is less than -3 (indicating stationarity).
+     * A basic ADF test (no extra lag terms). Returns true if t-statistic < -3.
      */
     private performADFTest(data: number[]): boolean {
         if (data.length < 3) return false;
@@ -240,38 +296,35 @@ export class Visual implements IVisual {
         const m = dX.length;
         const meanLag = d3.mean(lagX)!;
         const meanDX = d3.mean(dX)!;
-        let numerator = 0, denominator = 0;
+        let num = 0, den = 0;
         for (let i = 0; i < m; i++) {
-            numerator += (lagX[i] - meanLag) * (dX[i] - meanDX);
-            denominator += Math.pow(lagX[i] - meanLag, 2);
+            num += (lagX[i] - meanLag) * (dX[i] - meanDX);
+            den += Math.pow(lagX[i] - meanLag, 2);
         }
-        const slope = numerator / denominator;
+        const slope = num / den;
         let ssr = 0;
         for (let i = 0; i < m; i++) {
             const pred = slope * lagX[i];
             ssr += Math.pow(dX[i] - pred, 2);
         }
         const s2 = ssr / (m - 2);
-        const se = Math.sqrt(s2 / denominator);
+        const se = Math.sqrt(s2 / den);
         const tStat = slope / se;
         console.log("ADF t-statistic:", tStat);
         return tStat < -3;
     }
 
     /**
-     * Renders the difference chart. If the diff series is stationary, the OU process
-     * can be applied (and an OU forecast line can be drawn). For now, the code draws the
-     * historical diff series and displays a message.
+     * Renders Chart 1: The difference series (Error for Bond1 minus Bond2) with OU process forecast if stationary.
      */
     private renderDiffChart(isStationary: boolean) {
-        this.svg.selectAll("*").remove();
-        const width = this.currentViewport.width || 300;
-        const height = this.currentViewport.height || 200;
-        this.svg.attr("width", width).attr("height", height);
+        this.svgChart1.selectAll("*").remove();
+        const width = this.currentViewport.width || 600;
+        const height = this.currentViewport.height || 300;
+        this.svgChart1.attr("width", width).attr("height", height);
         const innerWidth = width - this.margin.left - this.margin.right;
         const innerHeight = height - this.margin.top - this.margin.bottom;
-
-        const g = this.svg.append("g")
+        const g = this.svgChart1.append("g")
             .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
 
         if (this.diffSeries.length < 1) {
@@ -284,16 +337,17 @@ export class Visual implements IVisual {
             return;
         }
 
+        // Build x and y scales.
         const xScale = d3.scaleTime()
             .domain([this.diffSeries[0].inputdate, this.diffSeries[this.diffSeries.length-1].inputdate])
             .range([0, innerWidth]);
-        const allDiff = this.diffSeries.map(d => d.diff);
+        const allDiffs = this.diffSeries.map(d => d.diff);
         const yScale = d3.scaleLinear()
-            .domain([d3.min(allDiff) as number, d3.max(allDiff) as number])
+            .domain([d3.min(allDiffs) as number, d3.max(allDiffs) as number])
             .range([innerHeight, 0])
             .nice();
 
-        // Append axes.
+        // Draw axes.
         g.append("g")
             .attr("transform", `translate(0, ${innerHeight})`)
             .call(d3.axisBottom(xScale).tickFormat(d3.timeFormat("%b %d, %Y")));
@@ -305,32 +359,157 @@ export class Visual implements IVisual {
             .y(d => yScale(d.diff))
             .curve(d3.curveMonotoneX);
 
-        // Draw the historical difference line.
+        // Historical difference line.
         g.append("path")
             .datum(this.diffSeries)
             .attr("fill", "none")
-            .attr("stroke", "#1f77b4")
+            .attr("stroke", "#00818F")
             .attr("stroke-width", 2)
-            .style("stroke-dasharray", "0")
             .attr("d", lineGen);
 
         if (isStationary) {
+            // Compute OU forecast on diff series.
+            const n = this.diffSeries.length - 1;
+            const firstTime = this.diffSeries[0].inputdate.getTime();
+            const lastTime = this.diffSeries[this.diffSeries.length-1].inputdate.getTime();
+            const delta = (lastTime - firstTime) / n;
+            const deltaDays = delta / (1000 * 60 * 60 * 24);
+
+            // Compute OU parameters from the historical diff series.
+            const diffValues = this.diffSeries.map(d => d.diff);
+            const diffMean = d3.mean(diffValues)!;
+            let num = 0, den = 0;
+            for (let i = 0; i < n; i++) {
+                num += (diffValues[i+1] - diffMean) * (diffValues[i] - diffMean);
+                den += Math.pow(diffValues[i] - diffMean, 2);
+            }
+            let alphaHat = num / den;
+            alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
+            this.lambdaHat = -Math.log(alphaHat) / deltaDays;
+            let sumResidual = 0;
+            for (let i = 0; i < n; i++) {
+                sumResidual += diffValues[i+1] - alphaHat * diffValues[i];
+            }
+            this.muHat = sumResidual / (n * (1 - alphaHat));
+            let sumSq = 0;
+            for (let i = 0; i < n; i++) {
+                const r = diffValues[i+1] - alphaHat * diffValues[i] - (1 - alphaHat) * this.muHat;
+                sumSq += r * r;
+            }
+            const sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1/n) * sumSq;
+            this.sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
+
+            // Apply slider scaling.
+            const lambdaFactor = parseFloat(this.lambdaSlider.value);
+            const sigmaFactor = parseFloat(this.sigmaSlider.value);
+            const newLambda = this.lambdaHat * lambdaFactor;
+            const newSigma = this.sigmaHat * sigmaFactor;
+            const alpha = Math.exp(-newLambda * deltaDays);
+
+            // Prepare forecast series (e.g., 50 future steps).
+            const forecastSteps = 50;
+            const diffData = this.diffSeries;
+            const lastDiff = diffData[diffData.length - 1].diff;
+            let forecastPoints: DiffPoint[] = [];
+            for (let i = 1; i <= forecastSteps; i++) {
+                const nextDate = new Date(this.diffSeries[this.diffSeries.length-1].inputdate.getTime() + i * delta);
+                const meanForecast = this.muHat + (lastDiff - this.muHat) * Math.pow(alpha, i);
+                forecastPoints.push({ inputdate: nextDate, diff: meanForecast });
+            }
+            // Draw forecast line.
+            g.append("path")
+                .datum(forecastPoints)
+                .attr("fill", "none")
+                .attr("stroke", "orange")
+                .attr("stroke-width", 2)
+                .attr("d", lineGen);
+
             g.append("text")
-              .attr("x", innerWidth / 2)
-              .attr("y", 15)
-              .attr("text-anchor", "middle")
-              .style("fill", "green")
-              .style("font-size", "12px")
-              .text("ADF passed: Stationary. OU process can be applied.");
-            // (Optional: Add OU forecast line here.)
+                .attr("x", innerWidth/2)
+                .attr("y", 15)
+                .attr("text-anchor", "middle")
+                .style("fill", "green")
+                .style("font-size", "12px")
+                .text("ADF passed: Series is stationary. OU process applied.");
         } else {
             g.append("text")
-              .attr("x", innerWidth / 2)
-              .attr("y", 15)
-              .attr("text-anchor", "middle")
-              .style("fill", "red")
-              .style("font-size", "12px")
-              .text("ADF failed: Non-stationary. OU not applied.");
+                .attr("x", innerWidth/2)
+                .attr("y", 15)
+                .attr("text-anchor", "middle")
+                .style("fill", "red")
+                .style("font-size", "12px")
+                .text("ADF failed: Series is non-stationary. OU not applied.");
         }
+    }
+
+    /**
+     * Renders Chart 2: A dual-line chart for the error series of each bond.
+     */
+    private renderDualChart(selectedIsin1: string, selectedIsin2: string) {
+        this.svgChart2.selectAll("*").remove();
+        const width = this.currentViewport.width || 600;
+        const height = this.currentViewport.height || 300;
+        this.svgChart2.attr("width", width).attr("height", height);
+        const innerWidth = width - this.margin.left - this.margin.right;
+        const innerHeight = height - this.margin.top - this.margin.bottom;
+        const g2 = this.svgChart2.append("g")
+            .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
+
+        // Filter ERROR rows (normalized) for each bond.
+        const errorRows = this.allData.filter(d => d.context1.trim().toUpperCase() === "ERROR");
+        const seriesBond1 = errorRows.filter(d => d.isin1.trim() === selectedIsin1.trim())
+            .map(d => ({ date: d.inputdate, value: d.error }));
+        const seriesBond2 = errorRows.filter(d => d.isin1.trim() === selectedIsin2.trim())
+            .map(d => ({ date: d.inputdate, value: d.error }));
+
+        // Sort both series by date.
+        seriesBond1.sort((a, b) => a.date.getTime() - b.date.getTime());
+        seriesBond2.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+        // X scale: based on full date range from the filtered data.
+        const allDates = errorRows.map(d => d.inputdate);
+        const xScale2 = d3.scaleTime()
+            .domain([d3.min(allDates) as Date, d3.max(allDates) as Date])
+            .range([0, innerWidth]);
+        // Y scale: based on the error values.
+        const allValues = seriesBond1.map(d => d.value).concat(seriesBond2.map(d => d.value));
+        const yScale2 = d3.scaleLinear()
+            .domain([d3.min(allValues) as number, d3.max(allValues) as number])
+            .range([innerHeight, 0])
+            .nice();
+
+        // Axes.
+        g2.append("g")
+            .attr("transform", `translate(0, ${innerHeight})`)
+            .call(d3.axisBottom(xScale2).tickFormat(d3.timeFormat("%b %d, %Y")));
+        g2.append("g")
+            .call(d3.axisLeft(yScale2));
+
+        const lineGen2 = d3.line<{ date: Date, value: number }>()
+            .x(d => xScale2(d.date))
+            .y(d => yScale2(d.value))
+            .curve(d3.curveMonotoneX);
+
+        // Draw Bond1 error line.
+        g2.append("path")
+            .datum(seriesBond1)
+            .attr("fill", "none")
+            .attr("stroke", "#00818F")
+            .attr("stroke-width", 2)
+            .attr("d", lineGen2);
+        // Draw Bond2 error line.
+        g2.append("path")
+            .datum(seriesBond2)
+            .attr("fill", "none")
+            .attr("stroke", "orange")
+            .attr("stroke-width", 2)
+            .attr("d", lineGen2);
+
+        g2.append("text")
+            .attr("x", innerWidth/2)
+            .attr("y", -5)
+            .attr("text-anchor", "middle")
+            .style("font-size", "14px")
+            .text("Error Series: Bond1 vs Bond2");
     }
 }
