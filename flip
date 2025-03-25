@@ -1,7 +1,4 @@
-df[['Bond1','Bond2','ZScore1','ZScore2']] = df.apply(
-    lambda row: (row['Bond1'], row['Bond2'], row['ZScore1'], row['ZScore2'])
-    if row['ZScore1'] < 0
-    else (row['Bond2'], row['Bond1'], row['ZScore2'], row['ZScore1']),
-    axis=1, 
-    result_type='expand'
-)
+df_label = pd.concat([
+    df_pairs[['Date','Bond1']].assign(side='cheap').rename(columns={'Bond1': 'isin'}),
+    df_pairs[['Date','Bond2']].assign(side='rich').rename(columns={'Bond2': 'isin'})
+], ignore_index=True)
