@@ -1,0 +1,44 @@
+Measure_SumOfErrors_ForLatestPValueIsins =
+VAR MaxPValueDate =
+    CALCULATE(
+        MAX('YourTable'[inputdate]),
+        'YourTable'[conetx1] = "P_VALUE"
+    )
+VAR PValueIsins_Union =
+    CALCULATETABLE(
+        DISTINCT(
+            UNION(
+                // All isin1 values for the latest P_VALUE date
+                SELECTCOLUMNS(
+                    FILTER(
+                        'YourTable',
+                        'YourTable'[inputdate] = MaxPValueDate &&
+                        'YourTable'[conetx1] = "P_VALUE"
+                    ),
+                    "isin", 'YourTable'[isin1]
+                ),
+                // All isin2 values for the latest P_VALUE date
+                SELECTCOLUMNS(
+                    FILTER(
+                        'YourTable',
+                        'YourTable'[inputdate] = MaxPValueDate &&
+                        'YourTable'[conetx1] = "P_VALUE"
+                    ),
+                    "isin", 'YourTable'[isin2]
+                )
+            )
+        )
+    )
+RETURN
+CALCULATE(
+    SUM('YourTable'[Error]),
+    // We only want rows where conetx1 = "ERROR"
+    'YourTable'[conetx1] = "ERROR",
+    // and where isin1 is in our union of (isin1 + isin2) from the P_VALUE rows
+    KEEPFILTERS(
+        TREATAS(
+            PValueIsins_Union,
+            'YourTable'[isin1]
+        )
+    )
+)
