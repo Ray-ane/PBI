@@ -324,13 +324,13 @@ export class Visual implements IVisual {
         // Clear previous chart
         this.svg.selectAll("*").remove();
 
-        // Set up dimensions
-        const width = this.currentViewport.width || 600;
-        const height = this.currentViewport.height || 300;
+        // Set up dimensions with proper viewport handling
+        const width = Math.max(this.currentViewport.width, 600);
+        const height = Math.max(this.currentViewport.height, 300);
         this.svg.attr("width", width).attr("height", height);
 
-        // Define margins with more space for x-axis
-        const margin = { top: 40, right: 30, bottom: 100, left: 50 }; // Increased bottom margin
+        // Define margins with more space for x-axis and right side
+        const margin = { top: 40, right: 50, bottom: 100, left: 50 };
         const innerWidth = width - margin.left - margin.right;
         const innerHeight = height - margin.top - margin.bottom;
 
@@ -350,9 +350,12 @@ export class Visual implements IVisual {
             return;
         }
 
-        // Create scales
+        // Create scales with proper domain handling
         const xScale = d3.scaleTime()
-            .domain([this.diffSeries[0].inputdate, this.diffSeries[this.diffSeries.length - 1].inputdate])
+            .domain([
+                d3.min(this.diffSeries, d => d.inputdate)!,
+                d3.max(this.diffSeries, d => d.inputdate)!
+            ])
             .range([0, innerWidth]);
 
         const yScale = d3.scaleLinear()
@@ -365,8 +368,8 @@ export class Visual implements IVisual {
 
         // Create axes with improved date formatting
         const xAxis = d3.axisBottom(xScale)
-            .tickFormat(d3.timeFormat("%Y-%m-%d")) // Format: "YYYY-MM-DD"
-            .ticks(Math.max(3, Math.floor(innerWidth / 200))); // Adjust number of ticks based on width
+            .tickFormat(d3.timeFormat("%Y-%m-%d"))
+            .ticks(Math.max(3, Math.floor(innerWidth / 150)));
 
         const yAxis = d3.axisLeft(yScale);
 
@@ -394,7 +397,7 @@ export class Visual implements IVisual {
             .style("font-weight", "normal")
             .attr("dy", "0.71em")
             .attr("dx", "-0.71em")
-            .style("white-space", "nowrap"); // Prevent text wrapping
+            .style("white-space", "nowrap");
 
         // Add y-axis with styling
         const yAxisGroup = g.append("g")
@@ -419,7 +422,7 @@ export class Visual implements IVisual {
             .y(d => yScale(d.diff))
             .curve(d3.curveMonotoneX);
 
-        // Draw historical line with improved styling
+        // Draw historical line
         g.append("path")
             .datum(this.diffSeries)
             .attr("fill", "none")
@@ -476,7 +479,7 @@ export class Visual implements IVisual {
 
             // Generate forecast points
             const lastDiff = this.diffSeries[this.diffSeries.length - 1].diff;
-            const forecastSteps = 50;
+            const forecastSteps = 30; // Reduced forecast steps
             let forecastPoints: DiffPoint[] = [];
             let upperBoundPoints: DiffPoint[] = [];
             let lowerBoundPoints: DiffPoint[] = [];
@@ -492,6 +495,19 @@ export class Visual implements IVisual {
                 upperBoundPoints.push({ inputdate: nextDate, diff: meanForecast + 1.96 * stdDev });
                 lowerBoundPoints.push({ inputdate: nextDate, diff: meanForecast - 1.96 * stdDev });
             }
+
+            // Update x-scale domain to include forecast
+            xScale.domain([
+                d3.min(this.diffSeries, d => d.inputdate)!,
+                d3.max(forecastPoints, d => d.inputdate)!
+            ]);
+
+            // Redraw axes with updated scale
+            g.select(".x-axis").remove();
+            g.append("g")
+                .attr("class", "x-axis")
+                .attr("transform", `translate(0, ${innerHeight})`)
+                .call(xAxis);
 
             // Draw confidence interval
             g.append("path")
@@ -527,7 +543,7 @@ export class Visual implements IVisual {
                 .style("font-size", "12px")
                 .text("ADF passed: Series stationary. OU applied.");
         } else {
-            // Add status text with improved styling
+            // Add status text
             g.append("text")
                 .attr("x", innerWidth / 2)
                 .attr("y", 15)
