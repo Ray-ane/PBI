@@ -397,7 +397,7 @@ export class Visual implements IVisual {
         this.svg.attr("width", width).attr("height", height);
 
         // Define margins with increased bottom margin for x-axis
-        const margin = { top: 40, right: 30, bottom: 100, left: 60 };
+        const margin = { top: 40, right: 30, bottom: 120, left: 60 };
         const innerWidth = width - margin.left - margin.right;
         const innerHeight = height - margin.top - margin.bottom;
 
@@ -534,7 +534,7 @@ export class Visual implements IVisual {
         }
 
         // Dynamically determine tick count
-        const tickCount = Math.max(2, Math.floor(innerWidth / 80));
+        const tickCount = Math.max(2, Math.floor(innerWidth / 100));
         
         // Create and add x-axis with improved formatting
         const xAxis = d3.axisBottom(xScale)
@@ -545,15 +545,15 @@ export class Visual implements IVisual {
             .attr("transform", `translate(0, ${innerHeight})`)
             .call(xAxis);
 
-        // Style x-axis labels
+        // Style x-axis labels with improved positioning
         xAxisGroup.selectAll("text")
             .attr("transform", "rotate(-45)")
             .style("text-anchor", "end")
             .style("font-size", "12px")
             .style("fill", "#000")
             .style("font-weight", "bold")
-            .attr("dy", "0.71em")
-            .attr("dx", "-0.71em");
+            .attr("dy", "1em")
+            .attr("dx", "-0.5em");
 
         // Style x-axis line and ticks
         xAxisGroup.selectAll("line")
