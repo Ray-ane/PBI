@@ -321,50 +321,56 @@ export class Visual implements IVisual {
     }
 
     private renderChart(isStationary: boolean) {
+        // Clear previous chart
         this.svg.selectAll("*").remove();
+
+        // Set up dimensions
         const width = this.currentViewport.width || 600;
         const height = this.currentViewport.height || 300;
         this.svg.attr("width", width).attr("height", height);
-        
-        // Adjust margins to ensure x-axis is visible
+
+        // Define margins
         const margin = { top: 40, right: 30, bottom: 60, left: 50 };
         const innerWidth = width - margin.left - margin.right;
         const innerHeight = height - margin.top - margin.bottom;
-        
+
+        // Create main chart group
         const g = this.svg.append("g")
             .attr("transform", `translate(${margin.left}, ${margin.top})`);
 
+        // Check for data
         if (this.diffSeries.length < 1) {
             g.append("text")
-                .attr("x", 10)
-                .attr("y", 30)
+                .attr("x", innerWidth / 2)
+                .attr("y", innerHeight / 2)
+                .attr("text-anchor", "middle")
                 .attr("fill", "red")
                 .style("font-size", "14px")
                 .text("No data to display.");
             return;
         }
 
-        // Log the date range for debugging
-        console.log("Chart date range:", {
-            min: this.diffSeries[0].inputdate.toISOString(),
-            max: this.diffSeries[this.diffSeries.length - 1].inputdate.toISOString(),
-            totalPoints: this.diffSeries.length
-        });
-
+        // Create scales
         const xScale = d3.scaleTime()
             .domain([this.diffSeries[0].inputdate, this.diffSeries[this.diffSeries.length - 1].inputdate])
             .range([0, innerWidth]);
-        const allDiffs = this.diffSeries.map(d => d.diff);
+
         const yScale = d3.scaleLinear()
-            .domain([d3.min(allDiffs) as number, d3.max(allDiffs) as number])
+            .domain([
+                d3.min(this.diffSeries, d => d.diff) as number,
+                d3.max(this.diffSeries, d => d.diff) as number
+            ])
             .range([innerHeight, 0])
             .nice();
 
-        // Create x-axis with proper formatting and rotation
+        // Create axes
         const xAxis = d3.axisBottom(xScale)
             .tickFormat(d3.timeFormat("%b %d, %Y"))
-            .ticks(Math.max(2, Math.floor(innerWidth / 100))); // Adjust number of ticks based on width
+            .ticks(Math.max(2, Math.floor(innerWidth / 100)));
 
+        const yAxis = d3.axisLeft(yScale);
+
+        // Add axes to chart
         const xAxisGroup = g.append("g")
             .attr("transform", `translate(0, ${innerHeight})`)
             .call(xAxis);
@@ -375,16 +381,16 @@ export class Visual implements IVisual {
             .style("text-anchor", "end")
             .style("font-size", "10px");
 
-        // Add y-axis
         g.append("g")
-            .call(d3.axisLeft(yScale));
+            .call(yAxis);
 
+        // Create line generator
         const lineGen = d3.line<DiffPoint>()
             .x(d => xScale(d.inputdate))
             .y(d => yScale(d.diff))
             .curve(d3.curveMonotoneX);
 
-        // Draw the historical difference series.
+        // Draw historical line
         g.append("path")
             .datum(this.diffSeries)
             .attr("fill", "none")
@@ -393,10 +399,12 @@ export class Visual implements IVisual {
             .attr("d", lineGen);
 
         if (isStationary) {
-            // Estimate OU parameters on the diff series.
+            // Calculate OU parameters
             const n = this.diffSeries.length - 1;
             const diffValues = this.diffSeries.map(d => d.diff);
             const diffMean = d3.mean(diffValues)!;
+            
+            // Calculate alpha
             let num = 0, den = 0;
             for (let i = 0; i < n; i++) {
                 num += (diffValues[i + 1] - diffMean) * (diffValues[i] - diffMean);
@@ -404,16 +412,24 @@ export class Visual implements IVisual {
             }
             let alphaHat = num / den;
             alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
+
+            // Calculate time parameters
             const firstTime = this.diffSeries[0].inputdate.getTime();
             const lastTime = this.diffSeries[this.diffSeries.length - 1].inputdate.getTime();
             const delta = (lastTime - firstTime) / n;
             const deltaDays = delta / (1000 * 60 * 60 * 24);
+
+            // Calculate OU parameters
             this.lambdaHat = -Math.log(alphaHat) / deltaDays;
+            
+            // Calculate mu
             let sumResidual = 0;
             for (let i = 0; i < n; i++) {
                 sumResidual += diffValues[i + 1] - alphaHat * diffValues[i];
             }
             this.muHat = sumResidual / (n * (1 - alphaHat));
+
+            // Calculate sigma
             let sumSq = 0;
             for (let i = 0; i < n; i++) {
                 const r = diffValues[i + 1] - alphaHat * diffValues[i] - (1 - alphaHat) * this.muHat;
@@ -422,23 +438,55 @@ export class Visual implements IVisual {
             const sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
             this.sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
 
-            // Apply slider scaling.
+            // Apply slider scaling
             const lambdaFactor = parseFloat(this.lambdaSlider.value);
             const sigmaFactor = parseFloat(this.sigmaSlider.value);
             const newLambda = this.lambdaHat * lambdaFactor;
             const newSigma = this.sigmaHat * sigmaFactor;
             const alpha = Math.exp(-newLambda * deltaDays);
 
-            // Prepare forecast series (50 steps ahead).
-            const diffData = this.diffSeries;
-            const lastDiff = diffData[diffData.length - 1].diff;
-            let forecastPoints: DiffPoint[] = [];
+            // Generate forecast points
+            const lastDiff = this.diffSeries[this.diffSeries.length - 1].diff;
             const forecastSteps = 50;
+            let forecastPoints: DiffPoint[] = [];
+            let upperBoundPoints: DiffPoint[] = [];
+            let lowerBoundPoints: DiffPoint[] = [];
+
             for (let i = 1; i <= forecastSteps; i++) {
-                const nextDate = new Date(diffData[diffData.length - 1].inputdate.getTime() + i * delta);
+                const nextDate = new Date(lastTime + i * delta);
                 const meanForecast = this.muHat + (lastDiff - this.muHat) * Math.pow(alpha, i);
+                const varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2 * i));
+                const stdDev = Math.sqrt(varForecast);
+                
                 forecastPoints.push({ inputdate: nextDate, diff: meanForecast });
+                upperBoundPoints.push({ inputdate: nextDate, diff: meanForecast + 1.96 * stdDev });
+                lowerBoundPoints.push({ inputdate: nextDate, diff: meanForecast - 1.96 * stdDev });
             }
+
+            // Draw confidence interval
+            const areaGen = d3.area<DiffPoint>()
+                .x(d => xScale(d.inputdate))
+                .y0(d => yScale(d.diff))
+                .y1(d => yScale(d.diff))
+                .curve(d3.curveMonotoneX);
+
+            g.append("path")
+                .datum(upperBoundPoints)
+                .attr("fill", "none")
+                .attr("stroke", "grey")
+                .attr("stroke-width", 1)
+                .style("stroke-dasharray", "3,3")
+                .attr("d", lineGen);
+
+            g.append("path")
+                .datum(lowerBoundPoints)
+                .attr("fill", "none")
+                .attr("stroke", "grey")
+                .attr("stroke-width", 1)
+                .style("stroke-dasharray", "3,3")
+                .attr("d", lineGen);
+
+            // Draw forecast line
             g.append("path")
                 .datum(forecastPoints)
                 .attr("fill", "none")
@@ -446,6 +494,7 @@ export class Visual implements IVisual {
                 .attr("stroke-width", 2)
                 .attr("d", lineGen);
 
+            // Add status text
             g.append("text")
                 .attr("x", innerWidth / 2)
                 .attr("y", 15)
@@ -454,6 +503,7 @@ export class Visual implements IVisual {
                 .style("font-size", "12px")
                 .text("ADF passed: Series stationary. OU applied.");
         } else {
+            // Add status text for non-stationary case
             g.append("text")
                 .attr("x", innerWidth / 2)
                 .attr("y", 15)
