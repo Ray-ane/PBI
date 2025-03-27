@@ -227,42 +227,38 @@ export class Visual implements IVisual {
         const selectedPair = this.dropdownPairs.value;
         if (!selectedPair) return;
         const [selectedBond1, selectedBond2] = selectedPair.split(" - ");
-        console.log("Selected Pair:", selectedBond1, selectedBond2);
 
         // Filter rows with context1 === "ERROR" (normalized).
         const errorRows = this.allData.filter(d => d.context1.trim().toUpperCase() === "ERROR");
-        console.log("ERROR Rows:", errorRows);
 
         // Build maps for each bond (using day-level keys).
         const mapBond1 = new Map<string, number>();
-        errorRows.filter(d => d.bond1.trim() === selectedBond1.trim())
-            .forEach(d => {
-                const key = d.inputdate.toDateString();
-                mapBond1.set(key, d.error);
-            });
         const mapBond2 = new Map<string, number>();
-        errorRows.filter(d => d.bond1.trim() === selectedBond2.trim())
-            .forEach(d => {
-                const key = d.inputdate.toDateString();
+        
+        errorRows.forEach(d => {
+            const key = d.inputdate.toDateString();
+            if (d.bond1.trim() === selectedBond1.trim()) {
+                mapBond1.set(key, d.error);
+            } else if (d.bond1.trim() === selectedBond2.trim()) {
                 mapBond2.set(key, d.error);
-            });
-        console.log("Bond1 Map:", mapBond1);
-        console.log("Bond2 Map:", mapBond2);
+            }
+        });
 
         // Compute the difference series (for overlapping days).
         let diffSeries: DiffPoint[] = [];
         mapBond1.forEach((val1, key) => {
             if (mapBond2.has(key)) {
-                const val2 = mapBond2.get(key)!;
-                diffSeries.push({ inputdate: new Date(key), diff: val1 - val2 });
+                diffSeries.push({ 
+                    inputdate: new Date(key), 
+                    diff: mapBond2.get(key)! - val1 
+                });
             }
         });
+        
         diffSeries.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
-        console.log("Difference Series:", diffSeries);
         this.diffSeries = diffSeries;
 
         if (diffSeries.length < 2) {
-            console.log("Not enough overlapping data for difference series.");
             this.renderChart(false);
             return;
         }
@@ -271,38 +267,33 @@ export class Visual implements IVisual {
         const diffs = diffSeries.map(d => d.diff);
         const adfPassed = this.performADFTest(diffs);
         this.diffSeriesStationary = adfPassed;
-        console.log("ADF Test Stationary?", adfPassed);
 
-        // Render Chart 1.
+        // Render Chart
         this.renderChart(adfPassed);
     }
 
     private performADFTest(data: number[]): boolean {
         if (data.length < 3) return false;
-        let dX: number[] = [];
-        let lagX: number[] = [];
-        for (let i = 1; i < data.length; i++) {
-            dX.push(data[i] - data[i - 1]);
-            lagX.push(data[i - 1]);
-        }
-        const m = dX.length;
+        
+        const dX = data.slice(1).map((val, i) => val - data[i]);
+        const lagX = data.slice(0, -1);
+        
         const meanLag = d3.mean(lagX)!;
         const meanDX = d3.mean(dX)!;
-        let num = 0, den = 0;
-        for (let i = 0; i < m; i++) {
-            num += (lagX[i] - meanLag) * (dX[i] - meanDX);
-            den += Math.pow(lagX[i] - meanLag, 2);
-        }
+        
+        const num = dX.reduce((sum, val, i) => 
+            sum + (lagX[i] - meanLag) * (val - meanDX), 0);
+        const den = lagX.reduce((sum, val) => 
+            sum + Math.pow(val - meanLag, 2), 0);
+            
         const slope = num / den;
-        let ssr = 0;
-        for (let i = 0; i < m; i++) {
-            const pred = slope * lagX[i];
-            ssr += Math.pow(dX[i] - pred, 2);
-        }
-        const s2 = ssr / (m - 2);
+        const ssr = dX.reduce((sum, val, i) => 
+            sum + Math.pow(val - slope * lagX[i], 2), 0);
+            
+        const s2 = ssr / (dX.length - 2);
         const se = Math.sqrt(s2 / den);
         const tStat = slope / se;
-        console.log("ADF t-statistic:", tStat);
+        
         return tStat < -3;
     }
 
@@ -318,36 +309,29 @@ export class Visual implements IVisual {
         const diffMean = d3.mean(diffValues)!;
         
         // Calculate alpha
-        let num = 0, den = 0;
-        for (let i = 0; i < n; i++) {
-            num += (diffValues[i + 1] - diffMean) * (diffValues[i] - diffMean);
-            den += Math.pow(diffValues[i] - diffMean, 2);
-        }
-        let alphaHat = num / den;
-        alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
+        const num = diffValues.slice(1).reduce((sum, val, i) => 
+            sum + (val - diffMean) * (diffValues[i] - diffMean), 0);
+        const den = diffValues.slice(0, -1).reduce((sum, val) => 
+            sum + Math.pow(val - diffMean, 2), 0);
+        let alphaHat = Math.max(Math.min(num / den, 0.9999999), -0.9999999);
 
         // Calculate time parameters
-        const firstTime = dates[0].getTime();
-        const lastTime = dates[dates.length - 1].getTime();
-        const delta = (lastTime - firstTime) / n;
+        const delta = (dates[dates.length - 1].getTime() - dates[0].getTime()) / n;
         const deltaDays = delta / (1000 * 60 * 60 * 24);
 
         // Calculate OU parameters
         const lambdaHat = -Math.log(alphaHat) / deltaDays;
         
         // Calculate mu
-        let sumResidual = 0;
-        for (let i = 0; i < n; i++) {
-            sumResidual += diffValues[i + 1] - alphaHat * diffValues[i];
-        }
+        const sumResidual = diffValues.slice(1).reduce((sum, val, i) => 
+            sum + val - alphaHat * diffValues[i], 0);
         const muHat = sumResidual / (n * (1 - alphaHat));
 
         // Calculate sigma
-        let sumSq = 0;
-        for (let i = 0; i < n; i++) {
-            const r = diffValues[i + 1] - alphaHat * diffValues[i] - (1 - alphaHat) * muHat;
-            sumSq += r * r;
-        }
+        const sumSq = diffValues.slice(1).reduce((sum, val, i) => {
+            const r = val - alphaHat * diffValues[i] - (1 - alphaHat) * muHat;
+            return sum + r * r;
+        }, 0);
         const sigmaSqHat = (2 * lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
         const sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
 
@@ -360,12 +344,13 @@ export class Visual implements IVisual {
 
         // Generate forecast points
         const lastDiff = diffValues[diffValues.length - 1];
+        const lastTime = dates[dates.length - 1].getTime();
         const forecastSteps = 30;
-        let forecastPoints: DiffPoint[] = [];
-        let upperBoundPoints: DiffPoint[] = [];
-        let lowerBoundPoints: DiffPoint[] = [];
+        
+        const forecastPoints: DiffPoint[] = [];
+        const upperBoundPoints: DiffPoint[] = [];
+        const lowerBoundPoints: DiffPoint[] = [];
 
-        // Start forecast from the last historical point
         for (let i = 0; i <= forecastSteps; i++) {
             const nextDate = new Date(lastTime + i * delta);
             const meanForecast = muHat + (lastDiff - muHat) * Math.pow(alpha, i);
