@@ -34,13 +34,12 @@ export class Visual implements IVisual {
   // Chart margins.
   private margin = { top: 20, right: 30, bottom: 50, left: 50 };
 
-  // Stored data and estimated OU parameters.
-  // The "data" array will store the historical difference series.
+  // Stored difference series and OU parameters.
   private data: DiffPoint[] = [];
   private lambdaHat: number = 0;
   private muHat: number = 0;
   private sigmaHat: number = 0;
-  private delta: number = 1;  // time step in ms
+  private delta: number = 1; // time step in ms
 
   // OU scaling sliders.
   private lambdaSlider: HTMLInputElement;
@@ -50,19 +49,19 @@ export class Visual implements IVisual {
   private dropdownPairs: HTMLSelectElement;
 
   // Current viewport dimensions.
-  private currentViewport: { width: number, height: number } = { width: 600, height: 300 };
+  private currentViewport: { width: number; height: number } = { width: 600, height: 300 };
 
   // Flag indicating if the diff series passed the ADF test.
   private diffSeriesStationary: boolean = false;
 
-  // All parsed data from Power BI.
+  // All parsed data.
   private allData: DataRow[] = [];
 
   constructor(options: VisualConstructorOptions) {
     this.target = options.element;
     this.target.innerHTML = "";
 
-    // Create container for controls (dropdown and sliders).
+    // Create container for controls.
     const controlContainer = document.createElement("div");
     controlContainer.id = "control-container";
     controlContainer.innerHTML = `
@@ -85,35 +84,36 @@ export class Visual implements IVisual {
     `;
     this.target.appendChild(controlContainer);
 
-    // Get references for controls.
+    // Get control references.
     this.dropdownPairs = document.getElementById("pairDropdown") as HTMLSelectElement;
     this.lambdaSlider = document.getElementById("lambdaSlider") as HTMLInputElement;
     this.sigmaSlider = document.getElementById("sigmaSlider") as HTMLInputElement;
 
-    // Attach slider event listeners.
-    document.getElementById("lambdaSlider")?.addEventListener("input", (e: Event) => {
-      const input = e.target as HTMLInputElement;
-      document.getElementById("lambdaValue")!.innerText = input.value;
-      this.renderChart({ viewport: this.currentViewport } as VisualUpdateOptions);
-    });
-    document.getElementById("sigmaSlider")?.addEventListener("input", (e: Event) => {
-      const input = e.target as HTMLInputElement;
-      document.getElementById("sigmaValue")!.innerText = input.value;
-      this.renderChart({ viewport: this.currentViewport } as VisualUpdateOptions);
-    });
-    // When the dropdown changes, update the chart.
+    // Attach event listeners.
     this.dropdownPairs.addEventListener("change", () => {
       console.log("Dropdown changed. Selected pair:", this.dropdownPairs.value);
       this.updateChartInner();
     });
+    this.lambdaSlider.addEventListener("input", () => {
+      (document.getElementById("lambdaValue") as HTMLElement).innerText = this.lambdaSlider.value;
+      this.updateChartInner();
+    });
+    this.sigmaSlider.addEventListener("input", () => {
+      (document.getElementById("sigmaValue") as HTMLElement).innerText = this.sigmaSlider.value;
+      this.updateChartInner();
+    });
 
-    // Create the SVG container for Chart 1.
+    // Create container for Chart 1.
     const chartContainer = document.createElement("div");
     chartContainer.id = "chart1";
     this.target.appendChild(chartContainer);
-    this.svg = d3.select(chartContainer).append("svg").classed("ou-estimation-visual", true);
 
-    // Create a tooltip div.
+    // Create SVG container.
+    this.svg = d3.select(chartContainer)
+      .append("svg")
+      .classed("ou-estimation-visual", true);
+
+    // Create tooltip div.
     if (d3.select(this.target).select("div.tooltip").empty()) {
       d3.select(this.target)
         .append("div")
@@ -134,7 +134,7 @@ export class Visual implements IVisual {
     if (!dataView || !dataView.table) return;
     this.currentViewport = options.viewport || { width: 600, height: 300 };
 
-    // Reset sliders to 1.0.
+    // Reset sliders to default.
     this.lambdaSlider.value = "1.0";
     this.sigmaSlider.value = "1.0";
     document.getElementById("lambdaValue")!.innerText = "1.0";
@@ -143,7 +143,7 @@ export class Visual implements IVisual {
     const rows = dataView.table.rows;
     if (!rows || rows.length === 0) return;
 
-    // Parse all rows (do not discard any row).
+    // Parse all rows (do not filter out any row).
     let parsed: DataRow[] = [];
     rows.forEach((row: any[]) => {
       const dateVal = new Date(row[0]);
@@ -167,7 +167,7 @@ export class Visual implements IVisual {
     parsed.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
     this.allData = parsed;
 
-    // Use rows with context1 === "P_VALUE" (trim/uppercase) to populate the dropdown.
+    // Populate dropdown from rows with context1 === "P_VALUE" (normalized) from latest day.
     const pValueRows = parsed.filter(d => d.context1.trim().toUpperCase() === "P_VALUE");
     console.log("P_VALUE Rows:", pValueRows);
     if (pValueRows.length === 0) {
@@ -175,14 +175,11 @@ export class Visual implements IVisual {
       this.svg.selectAll("*").remove();
       return;
     }
-    // Find the latest date (by day) among P_VALUE rows.
     const maxDateMs = d3.max(pValueRows, d => d.inputdate.getTime())!;
     const maxDateObj = new Date(maxDateMs);
     console.log("Latest P_VALUE Date:", maxDateObj);
     const latestRows = pValueRows.filter(d => d.inputdate.toDateString() === maxDateObj.toDateString());
     console.log("Latest P_VALUE Rows (same day):", latestRows);
-
-    // Build unique pairs (using isin1 and isin2).
     const pairSet = new Set<string>();
     latestRows.forEach(row => {
       const pairKey = `${row.isin1}||${row.isin2}`;
@@ -190,8 +187,6 @@ export class Visual implements IVisual {
     });
     const uniquePairs = Array.from(pairSet);
     console.log("Unique Pairs:", uniquePairs);
-
-    // Populate the dropdown.
     this.dropdownPairs.options.length = 0;
     uniquePairs.forEach(pk => {
       const opt = document.createElement("option");
@@ -208,9 +203,9 @@ export class Visual implements IVisual {
   }
 
   /**
-   * updateChartInner() filters ERROR rows (normalized), builds day-level error series for each bond,
+   * updateChartInner() filters ERROR rows (normalized), builds day-level error series for the selected pair,
    * computes the difference series (Error for Bond1 minus Error for Bond2), applies the ADF test,
-   * and then renders the chart (with OU forecast if stationary).
+   * and then renders Chart 1 (with OU forecast if the series is stationary).
    */
   private updateChartInner() {
     if (this.dropdownPairs.options.length === 0) return;
@@ -219,7 +214,7 @@ export class Visual implements IVisual {
     const [selectedIsin1, selectedIsin2] = selectedPair.split("||");
     console.log("Selected Pair:", selectedIsin1, selectedIsin2);
 
-    // Filter rows where context1 === "ERROR" (normalized).
+    // Filter rows with context1 === "ERROR" (normalized).
     const errorRows = this.allData.filter(d => d.context1.trim().toUpperCase() === "ERROR");
     console.log("ERROR Rows:", errorRows);
 
@@ -239,7 +234,7 @@ export class Visual implements IVisual {
     console.log("Bond1 Map:", mapBond1);
     console.log("Bond2 Map:", mapBond2);
 
-    // Compute the difference series (for overlapping days).
+    // Compute the difference series for overlapping days.
     let diffSeries: DiffPoint[] = [];
     mapBond1.forEach((val1, key) => {
       if (mapBond2.has(key)) {
@@ -249,14 +244,14 @@ export class Visual implements IVisual {
     });
     diffSeries.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
     console.log("Difference Series:", diffSeries);
-    this.diffSeries = diffSeries;
+    this.data = diffSeries; // For rendering we use 'this.data'
     if (diffSeries.length < 2) {
       console.log("Not enough overlapping data for difference series.");
       this.renderChart(false);
       return;
     }
 
-    // Apply ADF test on the difference series.
+    // Apply ADF test.
     const diffs = diffSeries.map(d => d.diff);
     const adfPassed = this.performADFTest(diffs);
     this.diffSeriesStationary = adfPassed;
@@ -268,7 +263,7 @@ export class Visual implements IVisual {
 
   /**
    * A basic ADF test (without extra lags) on a numeric array.
-   * Returns true if the t-statistic is less than -3 (indicating stationarity).
+   * Returns true if the t-statistic is less than -3.
    */
   private performADFTest(data: number[]): boolean {
     if (data.length < 3) return false;
@@ -301,6 +296,7 @@ export class Visual implements IVisual {
 
   /**
    * Renders Chart 1: The difference series with OU forecast (if the series is stationary).
+   * This rendering mimics your provided V1 code exactly.
    */
   private renderChart(isStationary: boolean) {
     this.svg.selectAll("*").remove();
@@ -312,7 +308,7 @@ export class Visual implements IVisual {
     const g = this.svg.append("g")
       .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
 
-    if (this.diffSeries.length < 1) {
+    if (this.data.length < 1) {
       g.append("text")
         .attr("x", 10)
         .attr("y", 30)
@@ -323,37 +319,46 @@ export class Visual implements IVisual {
     }
 
     const xScale = d3.scaleTime()
-      .domain([this.diffSeries[0].inputdate, this.diffSeries[this.diffSeries.length - 1].inputdate])
+      .domain([this.data[0].inputdate, this.data[this.data.length - 1].inputdate])
       .range([0, innerWidth]);
-    const allDiffs = this.diffSeries.map(d => d.diff);
+    const allY = this.data.map(d => d.diff);
     const yScale = d3.scaleLinear()
-      .domain([d3.min(allDiffs) as number, d3.max(allDiffs) as number])
+      .domain([d3.min(allY) as number, d3.max(allY) as number])
       .range([innerHeight, 0])
       .nice();
 
-    g.append("g")
+    // X and Y axes.
+    const tickCount = Math.max(2, Math.floor(innerWidth / 80));
+    const xAxis = d3.axisBottom(xScale)
+      .ticks(tickCount)
+      .tickFormat(d3.timeFormat("%b %d, %Y"));
+    const xAxisGroup = g.append("g")
       .attr("transform", `translate(0, ${innerHeight})`)
-      .call(d3.axisBottom(xScale).tickFormat(d3.timeFormat("%b %d, %Y")));
-    g.append("g")
-      .call(d3.axisLeft(yScale));
+      .call(xAxis);
+    if (innerWidth < 300) {
+      xAxisGroup.selectAll("text")
+        .attr("transform", "rotate(-45)")
+        .style("text-anchor", "end");
+    }
+    g.append("g").call(d3.axisLeft(yScale));
 
     const lineGen = d3.line<DiffPoint>()
       .x(d => xScale(d.inputdate))
       .y(d => yScale(d.diff))
       .curve(d3.curveMonotoneX);
 
-    // Draw historical difference series.
+    // Draw historical diff series.
     g.append("path")
-      .datum(this.diffSeries)
+      .datum(this.data)
       .attr("fill", "none")
       .attr("stroke", "#00818F")
       .attr("stroke-width", 2)
       .attr("d", lineGen);
 
     if (isStationary) {
-      // Estimate OU parameters on the diff series.
-      const n = this.diffSeries.length - 1;
-      const diffValues = this.diffSeries.map(d => d.diff);
+      // Estimate OU parameters.
+      const n = this.data.length - 1;
+      const diffValues = this.data.map(d => d.diff);
       const diffMean = d3.mean(diffValues)!;
       let num = 0, den = 0;
       for (let i = 0; i < n; i++) {
@@ -362,8 +367,8 @@ export class Visual implements IVisual {
       }
       let alphaHat = num / den;
       alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
-      const firstTime = this.diffSeries[0].inputdate.getTime();
-      const lastTime = this.diffSeries[this.diffSeries.length - 1].inputdate.getTime();
+      const firstTime = this.data[0].inputdate.getTime();
+      const lastTime = this.data[this.data.length - 1].inputdate.getTime();
       const delta = (lastTime - firstTime) / n;
       const deltaDays = delta / (1000 * 60 * 60 * 24);
       this.lambdaHat = -Math.log(alphaHat) / deltaDays;
@@ -380,7 +385,7 @@ export class Visual implements IVisual {
       const sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
       this.sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
 
-      // Apply slider scaling.
+      // Get slider factors.
       const lambdaFactor = parseFloat(this.lambdaSlider.value);
       const sigmaFactor = parseFloat(this.sigmaSlider.value);
       const newLambda = this.lambdaHat * lambdaFactor;
@@ -388,7 +393,7 @@ export class Visual implements IVisual {
       const alpha = Math.exp(-newLambda * deltaDays);
 
       // Prepare forecast series (50 steps ahead).
-      const diffData = this.diffSeries;
+      const diffData = this.data;
       const lastDiff = diffData[diffData.length - 1].diff;
       let forecastPoints: DiffPoint[] = [];
       const forecastSteps = 50;
