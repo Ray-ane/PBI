@@ -1,83 +1,419 @@
-/* Styling for the control container (dropdown and sliders) */
-#control-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-bottom: 10px;
+"use strict";
+import "./../style/visual.less";
+import * as d3 from "d3";
+import powerbiVisualsApi from "powerbi-visuals-api";
+import IVisual = powerbiVisualsApi.extensibility.visual.IVisual;
+import VisualConstructorOptions = powerbiVisualsApi.extensibility.visual.VisualConstructorOptions;
+import VisualUpdateOptions = powerbiVisualsApi.extensibility.visual.VisualUpdateOptions;
+import DataView = powerbiVisualsApi.DataView;
+
+/**
+ * Data schema:
+ *   inputdate, context1, isin1, isin2, Bond1, Bond2, Error
+ */
+interface DataRow {
+  inputdate: Date;
+  context1: string;
+  isin1: string;
+  isin2: string;
+  bond1: string;
+  bond2: string;
+  error: number;
 }
 
-#dropdown-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  margin-bottom: 5px;
+/** For the difference series (Error for Bond1 minus Error for Bond2) */
+interface DiffPoint {
+  inputdate: Date;
+  diff: number;
 }
 
-#dropdown-container label {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  font-size: 12px;
-  margin: 0 5px;
-}
+export class Visual implements IVisual {
+  private target: HTMLElement;
+  // Dropdown for pair selection (formatted as "isin1||isin2")
+  private dropdownPairs: HTMLSelectElement;
+  // All parsed data.
+  private allData: DataRow[] = [];
+  // Computed difference series.
+  private diffSeries: DiffPoint[] = [];
+  // OU parameters computed from the difference series.
+  private lambdaHat: number = 0;
+  private muHat: number = 0;
+  private sigmaHat: number = 0;
+  private delta: number = 1; // time step in ms computed from dates
+  // SVG container for Chart 1.
+  private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
+  // OU scaling sliders.
+  private lambdaSlider: HTMLInputElement;
+  private sigmaSlider: HTMLInputElement;
+  // Current viewport dimensions.
+  private currentViewport: { width: number; height: number } = { width: 600, height: 300 };
+  // Flag indicating if the difference series passed the ADF test.
+  private diffSeriesStationary: boolean = false;
+  // Chart margins.
+  private margin: { top: number; right: number; bottom: number; left: number } =
+    { top: 20, right: 30, bottom: 50, left: 50 };
 
-#dropdown-container select {
-  font-size: 12px;
-  padding: 2px 4px;
-  margin: 0 5px;
-}
+  constructor(options: VisualConstructorOptions) {
+    this.target = options.element;
+    this.target.innerHTML = "";
 
-#slider-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  margin-bottom: 10px;
-}
+    // Create a container for controls (dropdown and sliders).
+    const controlContainer = document.createElement("div");
+    controlContainer.id = "control-container";
+    controlContainer.innerHTML = `
+      <div id="dropdown-container">
+          <label for="pairDropdown">Select Pair (isin1||isin2):</label>
+          <select id="pairDropdown"></select>
+      </div>
+      <div id="slider-container">
+          <div>
+              <label for="lambdaSlider">Lambda Factor:</label>
+              <input id="lambdaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+              <span id="lambdaValue">1.0</span>
+          </div>
+          <div>
+              <label for="sigmaSlider">Sigma Factor:</label>
+              <input id="sigmaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+              <span id="sigmaValue">1.0</span>
+          </div>
+      </div>
+    `;
+    this.target.appendChild(controlContainer);
 
-#slider-container > div {
-  margin: 0 10px;
-  display: flex;
-  align-items: center;
-}
+    // Get references for controls.
+    this.dropdownPairs = document.getElementById("pairDropdown") as HTMLSelectElement;
+    this.lambdaSlider = document.getElementById("lambdaSlider") as HTMLInputElement;
+    this.sigmaSlider = document.getElementById("sigmaSlider") as HTMLInputElement;
 
-#slider-container label {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  font-size: 12px;
-  color: #333;
-  margin-right: 5px;
-}
+    // Attach event listeners.
+    this.dropdownPairs.addEventListener("change", () => {
+      console.log("Dropdown changed. Selected pair:", this.dropdownPairs.value);
+      this.updateChartsInner();
+    });
+    this.lambdaSlider.addEventListener("input", () => {
+      (document.getElementById("lambdaValue") as HTMLElement).innerText = this.lambdaSlider.value;
+      this.updateChartsInner();
+    });
+    this.sigmaSlider.addEventListener("input", () => {
+      (document.getElementById("sigmaValue") as HTMLElement).innerText = this.sigmaSlider.value;
+      this.updateChartsInner();
+    });
 
-#slider-container input[type="range"] {
-  width: 60px;
-  height: 4px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: #ddd;
-  border-radius: 5px;
-  outline: none;
-  margin: 0 5px;
-}
+    // Create a container for Chart 1.
+    const chartContainer = document.createElement("div");
+    chartContainer.id = "chart1";
+    this.target.appendChild(chartContainer);
 
-#slider-container input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #00818F;
-  cursor: pointer;
-  border: none;
-}
+    // Create SVG container.
+    this.svg = d3.select(chartContainer).append("svg").classed("ou-estimation-visual", true);
 
-#slider-container input[type="range"]::-moz-range-thumb {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #00818F;
-  cursor: pointer;
-  border: none;
-}
+    // Create a tooltip container.
+    if (d3.select(this.target).select("div.tooltip").empty()) {
+      d3.select(this.target)
+        .append("div")
+        .attr("class", "tooltip")
+        .style("position", "absolute")
+        .style("pointer-events", "none")
+        .style("opacity", "0")
+        .style("background", "#fff")
+        .style("border", "1px solid #ccc")
+        .style("padding", "5px")
+        .style("border-radius", "3px")
+        .style("font-size", "12px");
+    }
+  }
 
-#slider-container span {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  font-size: 12px;
-  color: #333;
+  public update(options: VisualUpdateOptions) {
+    const dataView: DataView = options.dataViews && options.dataViews[0];
+    if (!dataView || !dataView.table) return;
+    this.currentViewport = options.viewport || { width: 600, height: 300 };
+
+    // Reset sliders to 1.0.
+    this.lambdaSlider.value = "1.0";
+    this.sigmaSlider.value = "1.0";
+    (document.getElementById("lambdaValue") as HTMLElement).innerText = "1.0";
+    (document.getElementById("sigmaValue") as HTMLElement).innerText = "1.0";
+
+    const rows = dataView.table.rows;
+    if (!rows || rows.length === 0) return;
+
+    // Parse data (do not filter out any row).
+    let parsed: DataRow[] = [];
+    rows.forEach((row: any[]) => {
+      const dateVal = new Date(row[0]);
+      const context1 = row[1] ? row[1].toString() : "";
+      const isin1 = row[2] ? row[2].toString() : "";
+      const isin2 = row[3] ? row[3].toString() : "";
+      const bond1 = row[4] ? row[4].toString() : "";
+      const bond2 = row[5] ? row[5].toString() : "";
+      const err = +row[6];
+      parsed.push({
+        inputdate: dateVal,
+        context1: context1,
+        isin1: isin1,
+        isin2: isin2,
+        bond1: bond1,
+        bond2: bond2,
+        error: err
+      });
+    });
+    console.log("Parsed Data (all rows):", parsed);
+    parsed.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
+    this.allData = parsed;
+
+    // Use rows with context1 === "P_VALUE" (trim/uppercase) for pair extraction.
+    const pValueRows = parsed.filter(d => d.context1.trim().toUpperCase() === "P_VALUE");
+    console.log("P_VALUE Rows:", pValueRows);
+    if (pValueRows.length === 0) {
+      this.dropdownPairs.options.length = 0;
+      this.svg.selectAll("*").remove();
+      return;
+    }
+    // Find latest date (by day) among P_VALUE rows.
+    const maxDateMs = d3.max(pValueRows, d => d.inputdate.getTime())!;
+    const maxDateObj = new Date(maxDateMs);
+    console.log("Latest P_VALUE Date:", maxDateObj);
+    const latestRows = pValueRows.filter(d => d.inputdate.toDateString() === maxDateObj.toDateString());
+    console.log("Latest P_VALUE Rows (same day):", latestRows);
+
+    // Build unique pairs from latestRows (using isin1 and isin2).
+    const pairSet = new Set<string>();
+    latestRows.forEach(row => {
+      const pairKey = `${row.isin1}||${row.isin2}`;
+      pairSet.add(pairKey);
+    });
+    const uniquePairs = Array.from(pairSet);
+    console.log("Unique Pairs:", uniquePairs);
+
+    // Populate the dropdown.
+    this.dropdownPairs.options.length = 0;
+    uniquePairs.forEach(pk => {
+      const opt = document.createElement("option");
+      opt.value = pk;
+      opt.text = pk;
+      this.dropdownPairs.appendChild(opt);
+    });
+    if (uniquePairs.length > 0) {
+      this.dropdownPairs.value = uniquePairs[0];
+    }
+
+    // Build Chart 1 based on the filtered ERROR rows.
+    this.updateChartsInner();
+  }
+
+  /**
+   * updateChartsInner() filters rows where context1 === "ERROR" (normalized), builds day-level maps
+   * for each bond (using isin1), computes the difference series (Error for Bond1 minus Error for Bond2),
+   * applies the ADF test, and renders the chart (with OU forecast if stationary).
+   */
+  private updateChartsInner() {
+    if (this.dropdownPairs.options.length === 0) return;
+    const selectedPair = this.dropdownPairs.value;
+    if (!selectedPair) return;
+    const [selectedIsin1, selectedIsin2] = selectedPair.split("||");
+    console.log("Selected Pair:", selectedIsin1, selectedIsin2);
+
+    // Filter rows with context1 === "ERROR".
+    const errorRows = this.allData.filter(d => d.context1.trim().toUpperCase() === "ERROR");
+    console.log("ERROR Rows:", errorRows);
+
+    // Build maps for each bond using day-level keys.
+    const mapBond1 = new Map<string, number>();
+    errorRows.filter(d => d.isin1.trim() === selectedIsin1.trim())
+      .forEach(d => {
+        const key = d.inputdate.toDateString();
+        mapBond1.set(key, d.error);
+      });
+    const mapBond2 = new Map<string, number>();
+    errorRows.filter(d => d.isin1.trim() === selectedIsin2.trim())
+      .forEach(d => {
+        const key = d.inputdate.toDateString();
+        mapBond2.set(key, d.error);
+      });
+    console.log("Bond1 Map:", mapBond1);
+    console.log("Bond2 Map:", mapBond2);
+
+    // Compute the difference series (for overlapping days).
+    let diffSeries: DiffPoint[] = [];
+    mapBond1.forEach((val1, key) => {
+      if (mapBond2.has(key)) {
+        const val2 = mapBond2.get(key)!;
+        diffSeries.push({ inputdate: new Date(key), diff: val1 - val2 });
+      }
+    });
+    diffSeries.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
+    console.log("Difference Series:", diffSeries);
+    this.diffSeries = diffSeries;
+
+    if (diffSeries.length < 2) {
+      console.log("Not enough overlapping data for difference series.");
+      this.renderChart(false);
+      return;
+    }
+
+    // Apply ADF test.
+    const diffs = diffSeries.map(d => d.diff);
+    const adfPassed = this.performADFTest(diffs);
+    this.diffSeriesStationary = adfPassed;
+    console.log("ADF Test Stationary?", adfPassed);
+
+    // Render Chart 1.
+    this.renderChart(adfPassed);
+  }
+
+  /**
+   * A basic ADF test (no extra lags) on a numeric array.
+   * Returns true if the t-statistic < -3.
+   */
+  private performADFTest(data: number[]): boolean {
+    if (data.length < 3) return false;
+    let dX: number[] = [];
+    let lagX: number[] = [];
+    for (let i = 1; i < data.length; i++) {
+      dX.push(data[i] - data[i - 1]);
+      lagX.push(data[i - 1]);
+    }
+    const m = dX.length;
+    const meanLag = d3.mean(lagX)!;
+    const meanDX = d3.mean(dX)!;
+    let num = 0, den = 0;
+    for (let i = 0; i < m; i++) {
+      num += (lagX[i] - meanLag) * (dX[i] - meanDX);
+      den += Math.pow(lagX[i] - meanLag, 2);
+    }
+    const slope = num / den;
+    let ssr = 0;
+    for (let i = 0; i < m; i++) {
+      const pred = slope * lagX[i];
+      ssr += Math.pow(dX[i] - pred, 2);
+    }
+    const s2 = ssr / (m - 2);
+    const se = Math.sqrt(s2 / den);
+    const tStat = slope / se;
+    console.log("ADF t-statistic:", tStat);
+    return tStat < -3;
+  }
+
+  /**
+   * Renders Chart 1: The difference series with OU forecast if the series is stationary.
+   */
+  private renderChart(isStationary: boolean) {
+    this.svg.selectAll("*").remove();
+    const width = this.currentViewport.width || 600;
+    const height = this.currentViewport.height || 300;
+    this.svg.attr("width", width).attr("height", height);
+    const innerWidth = width - this.margin.left - this.margin.right;
+    const innerHeight = height - this.margin.top - this.margin.bottom;
+    const g = this.svg.append("g")
+      .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
+
+    if (this.diffSeries.length < 1) {
+      g.append("text")
+        .attr("x", 10)
+        .attr("y", 30)
+        .attr("fill", "red")
+        .style("font-size", "14px")
+        .text("No data to display.");
+      return;
+    }
+
+    const xScale = d3.scaleTime()
+      .domain([this.diffSeries[0].inputdate, this.diffSeries[this.diffSeries.length - 1].inputdate])
+      .range([0, innerWidth]);
+    const allDiffs = this.diffSeries.map(d => d.diff);
+    const yScale = d3.scaleLinear()
+      .domain([d3.min(allDiffs) as number, d3.max(allDiffs) as number])
+      .range([innerHeight, 0])
+      .nice();
+
+    g.append("g")
+      .attr("transform", `translate(0, ${innerHeight})`)
+      .call(d3.axisBottom(xScale).tickFormat(d3.timeFormat("%b %d, %Y")));
+    g.append("g")
+      .call(d3.axisLeft(yScale));
+
+    const lineGen = d3.line<DiffPoint>()
+      .x(d => xScale(d.inputdate))
+      .y(d => yScale(d.diff))
+      .curve(d3.curveMonotoneX);
+
+    // Draw historical difference series.
+    g.append("path")
+      .datum(this.diffSeries)
+      .attr("fill", "none")
+      .attr("stroke", "#00818F")
+      .attr("stroke-width", 2)
+      .attr("d", lineGen);
+
+    if (isStationary) {
+      // Estimate OU parameters on the difference series.
+      const n = this.diffSeries.length - 1;
+      const diffValues = this.diffSeries.map(d => d.diff);
+      const diffMean = d3.mean(diffValues)!;
+      let num = 0, den = 0;
+      for (let i = 0; i < n; i++) {
+        num += (diffValues[i + 1] - diffMean) * (diffValues[i] - diffMean);
+        den += Math.pow(diffValues[i] - diffMean, 2);
+      }
+      let alphaHat = num / den;
+      alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
+      const firstTime = this.diffSeries[0].inputdate.getTime();
+      const lastTime = this.diffSeries[this.diffSeries.length - 1].inputdate.getTime();
+      const delta = (lastTime - firstTime) / n;
+      const deltaDays = delta / (1000 * 60 * 60 * 24);
+      this.lambdaHat = -Math.log(alphaHat) / deltaDays;
+      let sumResidual = 0;
+      for (let i = 0; i < n; i++) {
+        sumResidual += diffValues[i + 1] - alphaHat * diffValues[i];
+      }
+      this.muHat = sumResidual / (n * (1 - alphaHat));
+      let sumSq = 0;
+      for (let i = 0; i < n; i++) {
+        const r = diffValues[i + 1] - alphaHat * diffValues[i] - (1 - alphaHat) * this.muHat;
+        sumSq += r * r;
+      }
+      const sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
+      this.sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
+
+      // Apply slider scaling.
+      const lambdaFactor = parseFloat(this.lambdaSlider.value);
+      const sigmaFactor = parseFloat(this.sigmaSlider.value);
+      const newLambda = this.lambdaHat * lambdaFactor;
+      const newSigma = this.sigmaHat * sigmaFactor;
+      const alpha = Math.exp(-newLambda * deltaDays);
+
+      // Prepare forecast series (50 steps ahead).
+      const diffData = this.diffSeries;
+      const lastDiff = diffData[diffData.length - 1].diff;
+      let forecastPoints: DiffPoint[] = [];
+      const forecastSteps = 50;
+      for (let i = 1; i <= forecastSteps; i++) {
+        const nextDate = new Date(diffData[diffData.length - 1].inputdate.getTime() + i * delta);
+        const meanForecast = this.muHat + (lastDiff - this.muHat) * Math.pow(alpha, i);
+        forecastPoints.push({ inputdate: nextDate, diff: meanForecast });
+      }
+      g.append("path")
+        .datum(forecastPoints)
+        .attr("fill", "none")
+        .attr("stroke", "orange")
+        .attr("stroke-width", 2)
+        .attr("d", lineGen);
+
+      g.append("text")
+        .attr("x", innerWidth / 2)
+        .attr("y", 15)
+        .attr("text-anchor", "middle")
+        .style("fill", "green")
+        .style("font-size", "12px")
+        .text("ADF passed: Series stationary. OU applied.");
+    } else {
+      g.append("text")
+        .attr("x", innerWidth / 2)
+        .attr("y", 15)
+        .attr("text-anchor", "middle")
+        .style("fill", "red")
+        .style("font-size", "12px")
+        .text("ADF failed: Series non-stationary. OU not applied.");
+    }
+  }
 }
