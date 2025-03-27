@@ -451,6 +451,15 @@ export class Visual implements IVisual {
                 .style("font-size", "12px")
                 .text(`μ = ${this.muHat.toFixed(2)}, λ = ${this.lambdaHat.toFixed(2)} (×${lambdaFactor}), σ = ${this.sigmaHat.toFixed(2)} (×${sigmaFactor})`);
 
+            // Add status text at the same level
+            g.append("text")
+                .attr("x", innerWidth - 10)
+                .attr("y", -10)
+                .attr("text-anchor", "end")
+                .style("fill", "green")
+                .style("font-size", "12px")
+                .text("ADF passed: Series stationary. OU applied.");
+
             // Combine historical and forecast data for scales
             const allX = this.diffSeries.map(d => d.inputdate)
                 .concat(ouResults.forecastPoints.map(d => d.inputdate));
@@ -503,15 +512,6 @@ export class Visual implements IVisual {
                 .attr("stroke-width", 2)
                 .style("stroke-dasharray", "0")
                 .attr("d", lineGen);
-
-            // Add status text
-            g.append("text")
-                .attr("x", innerWidth / 2)
-                .attr("y", 15)
-                .attr("text-anchor", "middle")
-                .style("fill", "green")
-                .style("font-size", "12px")
-                .text("ADF passed: Series stationary. OU applied.");
         } else {
             // Create scales for historical data only
             xScale = d3.scaleTime()
@@ -538,15 +538,13 @@ export class Visual implements IVisual {
                 .style("stroke-dasharray", "0")
                 .attr("d", lineGen);
 
-            // Add status text
+            // Add status text at the same level
             g.append("text")
-                .attr("x", innerWidth / 2)
-                .attr("y", 15)
-                .attr("text-anchor", "middle")
+                .attr("x", innerWidth - 10)
+                .attr("y", -10)
+                .attr("text-anchor", "end")
                 .style("fill", "red")
                 .style("font-size", "12px")
-                .style("font-family", "sans-serif")
-                .style("font-weight", "bold")
                 .text("ADF failed: Series non-stationary. OU not applied.");
         }
 
