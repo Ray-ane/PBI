@@ -31,15 +31,16 @@ export class Visual implements IVisual {
   private target: HTMLElement;
   private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
 
-  // Chart margins.
+  // Increase bottom margin so x-axis labels are visible.
   private margin = { top: 20, right: 30, bottom: 50, left: 50 };
 
-  // The processed difference series (historical data).
+  // Stored difference series and estimated OU parameters.
+  // "data" will store the processed difference series as { x: Date, y: number }.
   private data: DiffPoint[] = [];
   private lambdaHat: number = 0;
   private muHat: number = 0;
   private sigmaHat: number = 0;
-  private delta: number = 1;  // time step in ms
+  private delta: number = 1; // time step in ms
 
   // OU scaling sliders.
   private lambdaSlider: HTMLInputElement;
@@ -54,7 +55,7 @@ export class Visual implements IVisual {
   // Flag indicating if the diff series passed the ADF test.
   private diffSeriesStationary: boolean = false;
 
-  // All parsed data.
+  // All parsed data from Power BI.
   private allData: DataRow[] = [];
 
   constructor(options: VisualConstructorOptions) {
@@ -175,7 +176,6 @@ export class Visual implements IVisual {
       this.svg.selectAll("*").remove();
       return;
     }
-    // Find latest date (by day) among P_VALUE rows.
     const maxDateMs = d3.max(pValueRows, d => d.inputdate.getTime())!;
     const maxDateObj = new Date(maxDateMs);
     console.log("Latest P_VALUE Date:", maxDateObj);
@@ -204,7 +204,7 @@ export class Visual implements IVisual {
 
   /**
    * updateChartInner() filters rows where context1 === "ERROR" (normalized),
-   * builds day-level error series for each bond (using isin1),
+   * builds day-level error series for the selected pair (using isin1),
    * computes the difference series (Error for Bond1 minus Error for Bond2),
    * applies the ADF test, and sets this.data.
    */
@@ -215,7 +215,7 @@ export class Visual implements IVisual {
     const [selectedIsin1, selectedIsin2] = selectedPair.split("||");
     console.log("Selected Pair:", selectedIsin1, selectedIsin2);
 
-    // Filter rows with context1 === "ERROR".
+    // Filter rows where context1 === "ERROR".
     const errorRows = this.allData.filter(d => d.context1.trim().toUpperCase() === "ERROR");
     console.log("ERROR Rows:", errorRows);
 
@@ -248,7 +248,7 @@ export class Visual implements IVisual {
     this.data = diffSeries;
     if (diffSeries.length < 2) {
       console.log("Not enough overlapping data for difference series.");
-      this.renderChart({ viewport: this.currentViewport });
+      this.renderChart(false, { viewport: this.currentViewport });
       return;
     }
 
@@ -258,7 +258,7 @@ export class Visual implements IVisual {
     this.diffSeriesStationary = adfPassed;
     console.log("ADF Test Stationary?", adfPassed);
 
-    this.renderChart({ viewport: this.currentViewport });
+    this.renderChart(adfPassed, { viewport: this.currentViewport });
   }
 
   /**
@@ -295,10 +295,11 @@ export class Visual implements IVisual {
   }
 
   /**
-   * Renders the chart exactly as in the provided sample code.
-   * Uses this.data (array of { x: Date, y: number }) for historical data.
+   * Renders the chart exactly as in your provided sample.
+   * Uses this.data (an array of { x: Date, y: number }) for historical data.
+   * Forecasts 50 steps ahead using OU process with slider scaling.
    */
-  private renderChart(options?: VisualUpdateOptions) {
+  private renderChart(isStationary: boolean, options?: VisualUpdateOptions) {
     if (!this.data || this.data.length < 2) return;
     const viewport = options?.viewport || this.currentViewport;
     const lambdaSlider = document.getElementById("lambdaSlider") as HTMLInputElement;
@@ -466,7 +467,6 @@ export class Visual implements IVisual {
             .transition().duration(500).style("opacity", 0);
       });
 
-    // Display parameter estimates above the chart.
     g.append("text")
       .attr("x", 10)
       .attr("y", -10)
