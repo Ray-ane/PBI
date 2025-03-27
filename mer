@@ -67,7 +67,6 @@ export class Visual implements IVisual {
         // Create a container for controls (dropdown and sliders).
         const controlContainer = document.createElement("div");
         controlContainer.id = "control-container";
-        controlContainer.style.marginBottom = "20px";
         controlContainer.innerHTML = `
             <div id="dropdown-container">
                 <label for="pairDropdown">Select Pair (isin1||isin2):</label>
@@ -434,6 +433,23 @@ export class Visual implements IVisual {
                 this.diffSeries.map(d => d.inputdate)
             );
 
+            // Store the parameters
+            this.lambdaHat = ouResults.lambda;
+            this.muHat = ouResults.mu;
+            this.sigmaHat = ouResults.sigma;
+
+            // Get the scaling factors
+            const lambdaFactor = parseFloat(this.lambdaSlider.value);
+            const sigmaFactor = parseFloat(this.sigmaSlider.value);
+
+            // Display parameter estimates above the chart
+            g.append("text")
+                .attr("x", 10)
+                .attr("y", -10)
+                .attr("fill", "#333")
+                .style("font-size", "12px")
+                .text(`μ = ${this.muHat.toFixed(2)}, λ = ${this.lambdaHat.toFixed(2)} (×${lambdaFactor}), σ = ${this.sigmaHat.toFixed(2)} (×${sigmaFactor})`);
+
             // Combine historical and forecast data for scales
             const allX = this.diffSeries.map(d => d.inputdate)
                 .concat(ouResults.forecastPoints.map(d => d.inputdate));
@@ -547,11 +563,10 @@ export class Visual implements IVisual {
 
         // Style x-axis labels with improved positioning
         xAxisGroup.selectAll("text")
-            .attr("transform", "rotate(-45)")
+            .attr("transform", "rotate(-20)")
             .style("text-anchor", "end")
-            .style("font-size", "12px")
+            .style("font-size", "10px")
             .style("fill", "#000")
-            .style("font-weight", "bold")
             .attr("dy", "1em")
             .attr("dx", "-0.5em");
 
@@ -571,8 +586,7 @@ export class Visual implements IVisual {
         // Style y-axis labels
         yAxisGroup.selectAll("text")
             .style("font-size", "12px")
-            .style("fill", "#000")
-            .style("font-weight", "bold");
+            .style("fill", "#000");
 
         // Style y-axis line and ticks
         yAxisGroup.selectAll("line")
