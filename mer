@@ -375,6 +375,7 @@ export class Visual implements IVisual {
 
         // Add axes to chart
         const xAxisGroup = g.append("g")
+            .attr("class", "x-axis")
             .attr("transform", `translate(0, ${innerHeight})`)
             .call(xAxis);
 
@@ -502,11 +503,8 @@ export class Visual implements IVisual {
                 d3.max(forecastPoints, d => d.inputdate)!
             ]);
 
-            // Redraw axes with updated scale
-            g.select(".x-axis").remove();
-            g.append("g")
-                .attr("class", "x-axis")
-                .attr("transform", `translate(0, ${innerHeight})`)
+            // Update x-axis with new scale
+            g.select(".x-axis")
                 .call(xAxis);
 
             // Draw confidence interval
