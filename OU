@@ -9,7 +9,7 @@ import DataView = powerbiVisualsApi.DataView;
 
 /**
  * Data schema:
- *   inputdate, context1, isin1, isin2, Bond1, Bond2, Error
+ *  inputdate, context1, isin1, isin2, Bond1, Bond2, Error
  */
 interface DataRow {
   inputdate: Date;
@@ -29,26 +29,35 @@ interface DiffPoint {
 
 export class Visual implements IVisual {
   private target: HTMLElement;
+
   // Dropdown for pair selection (formatted as "isin1||isin2")
   private dropdownPairs: HTMLSelectElement;
+
   // All parsed data.
   private allData: DataRow[] = [];
+
   // Computed difference series.
   private diffSeries: DiffPoint[] = [];
-  // OU parameters computed from the difference series.
+
+  // OU parameters computed from the diff series.
   private lambdaHat: number = 0;
   private muHat: number = 0;
   private sigmaHat: number = 0;
   private delta: number = 1; // time step in ms computed from dates
+
   // SVG container for Chart 1.
   private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
+
   // OU scaling sliders.
   private lambdaSlider: HTMLInputElement;
   private sigmaSlider: HTMLInputElement;
+
   // Current viewport dimensions.
   private currentViewport: { width: number; height: number } = { width: 600, height: 300 };
-  // Flag indicating if the difference series passed the ADF test.
+
+  // Flag indicating if the diff series passed the ADF test.
   private diffSeriesStationary: boolean = false;
+
   // Chart margins.
   private margin: { top: number; right: number; bottom: number; left: number } =
     { top: 20, right: 30, bottom: 50, left: 50 };
@@ -104,7 +113,7 @@ export class Visual implements IVisual {
     chartContainer.id = "chart1";
     this.target.appendChild(chartContainer);
 
-    // Create SVG container.
+    // Create the SVG container.
     this.svg = d3.select(chartContainer).append("svg").classed("ou-estimation-visual", true);
 
     // Create a tooltip container.
@@ -128,7 +137,7 @@ export class Visual implements IVisual {
     if (!dataView || !dataView.table) return;
     this.currentViewport = options.viewport || { width: 600, height: 300 };
 
-    // Reset sliders to 1.0.
+    // Reset sliders to default.
     this.lambdaSlider.value = "1.0";
     this.sigmaSlider.value = "1.0";
     (document.getElementById("lambdaValue") as HTMLElement).innerText = "1.0";
@@ -137,7 +146,7 @@ export class Visual implements IVisual {
     const rows = dataView.table.rows;
     if (!rows || rows.length === 0) return;
 
-    // Parse data (do not filter out any row).
+    // Parse all rows (do not filter out any row).
     let parsed: DataRow[] = [];
     rows.forEach((row: any[]) => {
       const dateVal = new Date(row[0]);
@@ -161,7 +170,7 @@ export class Visual implements IVisual {
     parsed.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
     this.allData = parsed;
 
-    // Use rows with context1 === "P_VALUE" (trim/uppercase) for pair extraction.
+    // Use rows where context1 is "P_VALUE" (normalized) to populate the dropdown.
     const pValueRows = parsed.filter(d => d.context1.trim().toUpperCase() === "P_VALUE");
     console.log("P_VALUE Rows:", pValueRows);
     if (pValueRows.length === 0) {
@@ -169,14 +178,14 @@ export class Visual implements IVisual {
       this.svg.selectAll("*").remove();
       return;
     }
-    // Find latest date (by day) among P_VALUE rows.
+    // Find the latest date (by day) among P_VALUE rows.
     const maxDateMs = d3.max(pValueRows, d => d.inputdate.getTime())!;
     const maxDateObj = new Date(maxDateMs);
     console.log("Latest P_VALUE Date:", maxDateObj);
     const latestRows = pValueRows.filter(d => d.inputdate.toDateString() === maxDateObj.toDateString());
     console.log("Latest P_VALUE Rows (same day):", latestRows);
 
-    // Build unique pairs from latestRows (using isin1 and isin2).
+    // Build unique pairs from latestRows using isin1 and isin2.
     const pairSet = new Set<string>();
     latestRows.forEach(row => {
       const pairKey = `${row.isin1}||${row.isin2}`;
@@ -197,14 +206,14 @@ export class Visual implements IVisual {
       this.dropdownPairs.value = uniquePairs[0];
     }
 
-    // Build Chart 1 based on the filtered ERROR rows.
+    // Update the chart.
     this.updateChartsInner();
   }
 
   /**
-   * updateChartsInner() filters rows where context1 === "ERROR" (normalized), builds day-level maps
-   * for each bond (using isin1), computes the difference series (Error for Bond1 minus Error for Bond2),
-   * applies the ADF test, and renders the chart (with OU forecast if stationary).
+   * updateChartsInner() filters ERROR rows (normalized), builds day-level error series for each bond,
+   * computes the difference series (Error for Bond1 minus Error for Bond2),
+   * applies the ADF test, and then renders the chart.
    */
   private updateChartsInner() {
     if (this.dropdownPairs.options.length === 0) return;
@@ -213,11 +222,11 @@ export class Visual implements IVisual {
     const [selectedIsin1, selectedIsin2] = selectedPair.split("||");
     console.log("Selected Pair:", selectedIsin1, selectedIsin2);
 
-    // Filter rows with context1 === "ERROR".
+    // Filter rows with context1 === "ERROR" (normalized).
     const errorRows = this.allData.filter(d => d.context1.trim().toUpperCase() === "ERROR");
     console.log("ERROR Rows:", errorRows);
 
-    // Build maps for each bond using day-level keys.
+    // Build maps for each bond (using day-level keys).
     const mapBond1 = new Map<string, number>();
     errorRows.filter(d => d.isin1.trim() === selectedIsin1.trim())
       .forEach(d => {
@@ -251,7 +260,7 @@ export class Visual implements IVisual {
       return;
     }
 
-    // Apply ADF test.
+    // Apply ADF test on the difference series.
     const diffs = diffSeries.map(d => d.diff);
     const adfPassed = this.performADFTest(diffs);
     this.diffSeriesStationary = adfPassed;
@@ -263,7 +272,7 @@ export class Visual implements IVisual {
 
   /**
    * A basic ADF test (no extra lags) on a numeric array.
-   * Returns true if the t-statistic < -3.
+   * Returns true if the t-statistic < -3 (indicating stationarity).
    */
   private performADFTest(data: number[]): boolean {
     if (data.length < 3) return false;
@@ -295,7 +304,7 @@ export class Visual implements IVisual {
   }
 
   /**
-   * Renders Chart 1: The difference series with OU forecast if the series is stationary.
+   * Renders Chart 1: The difference series with OU forecast (if stationary).
    */
   private renderChart(isStationary: boolean) {
     this.svg.selectAll("*").remove();
@@ -337,7 +346,7 @@ export class Visual implements IVisual {
       .y(d => yScale(d.diff))
       .curve(d3.curveMonotoneX);
 
-    // Draw historical difference series.
+    // Draw the historical difference series.
     g.append("path")
       .datum(this.diffSeries)
       .attr("fill", "none")
@@ -346,7 +355,7 @@ export class Visual implements IVisual {
       .attr("d", lineGen);
 
     if (isStationary) {
-      // Estimate OU parameters on the difference series.
+      // Estimate OU parameters on the diff series.
       const n = this.diffSeries.length - 1;
       const diffValues = this.diffSeries.map(d => d.diff);
       const diffMean = d3.mean(diffValues)!;
