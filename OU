@@ -21,7 +21,7 @@ interface DataRow {
   error: number;
 }
 
-/** For the difference series */
+/** For the difference series (Error for Bond1 minus Bond2) */
 interface DiffPoint {
   inputdate: Date;
   diff: number;
@@ -33,23 +33,23 @@ export class Visual implements IVisual {
   // Dropdown for pair selection (formatted as "isin1||isin2")
   private dropdownPairs: HTMLSelectElement;
 
-  // All data parsed from Power BI.
+  // All parsed data.
   private allData: DataRow[] = [];
 
-  // The computed difference series (Error for Bond1 minus Error for Bond2)
+  // Computed difference series.
   private diffSeries: DiffPoint[] = [];
 
-  // OU parameters (computed from the diff series if stationary)
+  // OU parameters computed from the diff series.
   private lambdaHat: number = 0;
   private muHat: number = 0;
   private sigmaHat: number = 0;
-  private delta: number = 1; // time step (ms) computed from dates
+  private delta: number = 1; // time step in ms computed from dates
 
   // SVG containers for two charts.
   private svgChart1: d3.Selection<SVGSVGElement, unknown, null, undefined>;
   private svgChart2: d3.Selection<SVGSVGElement, unknown, null, undefined>;
 
-  // Controls: dropdown and sliders.
+  // OU scaling sliders.
   private lambdaSlider: HTMLInputElement;
   private sigmaSlider: HTMLInputElement;
 
@@ -58,6 +58,10 @@ export class Visual implements IVisual {
 
   // Flag indicating if the diff series passed the ADF test.
   private diffSeriesStationary: boolean = false;
+
+  // Chart margins.
+  private margin: { top: number; right: number; bottom: number; left: number } =
+    { top: 20, right: 30, bottom: 50, left: 50 };
 
   constructor(options: VisualConstructorOptions) {
     this.target = options.element;
@@ -94,7 +98,7 @@ export class Visual implements IVisual {
     // Attach event listeners.
     this.dropdownPairs.addEventListener("change", () => {
       console.log("Dropdown changed. Selected pair:", this.dropdownPairs.value);
-      this.computeDiffAndRender();
+      this.updateChartsInner();
     });
     this.lambdaSlider.addEventListener("input", () => {
       (document.getElementById("lambdaValue") as HTMLElement).innerText = this.lambdaSlider.value;
@@ -121,7 +125,7 @@ export class Visual implements IVisual {
     chartsContainer.appendChild(chart2Div);
     this.target.appendChild(chartsContainer);
 
-    // Create SVGs.
+    // Create SVG containers.
     this.svgChart1 = d3.select(chart1Div).append("svg").classed("chart1", true);
     this.svgChart2 = d3.select(chart2Div).append("svg").classed("chart2", true);
 
@@ -155,7 +159,7 @@ export class Visual implements IVisual {
     const rows = dataView.table.rows;
     if (!rows || rows.length === 0) return;
 
-    // Parse all rows (do not filter any out).
+    // Parse data rows (do not filter out any row).
     let parsed: DataRow[] = [];
     rows.forEach((row: any[]) => {
       const dateVal = new Date(row[0]);
@@ -179,7 +183,7 @@ export class Visual implements IVisual {
     parsed.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
     this.allData = parsed;
 
-    // Extract rows where context1 === "P_VALUE" (trimmed/uppercased) for pair extraction.
+    // Extract rows where context1 is "P_VALUE" (trimmed and uppercased).
     const pValueRows = parsed.filter(d => d.context1.trim().toUpperCase() === "P_VALUE");
     console.log("P_VALUE Rows:", pValueRows);
     if (pValueRows.length === 0) {
@@ -195,7 +199,7 @@ export class Visual implements IVisual {
     const latestRows = pValueRows.filter(d => d.inputdate.toDateString() === maxDateObj.toDateString());
     console.log("Latest P_VALUE Rows (same day):", latestRows);
 
-    // Build unique pairs (using isin1 and isin2).
+    // Build unique pairs from latestRows using isin1 and isin2.
     const pairSet = new Set<string>();
     latestRows.forEach(row => {
       const pairKey = `${row.isin1}||${row.isin2}`;
@@ -216,15 +220,14 @@ export class Visual implements IVisual {
       this.dropdownPairs.value = uniquePairs[0];
     }
 
-    // Call internal chart update.
+    // Call the internal update to build charts.
     this.updateChartsInner();
   }
 
   /**
-   * updateChartsInner() builds the two charts.
-   * It filters ERROR rows (normalized), builds error series for each bond using day-level matching,
-   * computes the difference series, applies the ADF test, estimates OU parameters (if stationary),
-   * and renders Chart 1 (diff series with OU forecast) and Chart 2 (dual-line chart for error series).
+   * updateChartsInner() builds the two charts:
+   * - Chart 1: Difference series (Error for Bond1 minus Error for Bond2) with OU forecast.
+   * - Chart 2: Dual-line chart for ERROR series for each bond.
    */
   private updateChartsInner() {
     // Get selected pair.
@@ -234,11 +237,11 @@ export class Visual implements IVisual {
     const [selectedIsin1, selectedIsin2] = selectedPair.split("||");
     console.log("Selected Pair:", selectedIsin1, selectedIsin2);
 
-    // Filter ERROR rows (normalized).
+    // Filter rows with context1 === "ERROR" (normalized).
     const errorRows = this.allData.filter(d => d.context1.trim().toUpperCase() === "ERROR");
     console.log("ERROR Rows:", errorRows);
 
-    // Build day-level maps for each bond's error series.
+    // Build day-level maps for each bond.
     const mapBond1 = new Map<string, number>();
     errorRows.filter(d => d.isin1.trim() === selectedIsin1.trim())
       .forEach(d => {
@@ -254,7 +257,7 @@ export class Visual implements IVisual {
     console.log("Bond1 Map:", mapBond1);
     console.log("Bond2 Map:", mapBond2);
 
-    // Compute the difference series (for overlapping days).
+    // Compute the difference series: diff = error (Bond1) - error (Bond2).
     let diffSeries: DiffPoint[] = [];
     mapBond1.forEach((val1, key) => {
       if (mapBond2.has(key)) {
@@ -273,20 +276,20 @@ export class Visual implements IVisual {
       return;
     }
 
-    // Apply ADF test.
+    // Apply ADF test on the difference values.
     const diffs = diffSeries.map(d => d.diff);
     const adfPassed = this.performADFTest(diffs);
     this.diffSeriesStationary = adfPassed;
     console.log("ADF Test Stationary?", adfPassed);
 
-    // Render Chart 1 and Chart 2.
+    // Render both charts.
     this.renderDiffChart(adfPassed);
     this.renderDualChart(selectedIsin1, selectedIsin2);
   }
 
   /**
-   * A basic ADF test (no extra lags) on a numeric array.
-   * Returns true if the t-statistic is less than -3 (indicating stationarity).
+   * A basic ADF test (without extra lags) on a numeric array.
+   * Returns true if the t-statistic < -3 (indicating stationarity).
    */
   private performADFTest(data: number[]): boolean {
     if (data.length < 3) return false;
@@ -318,7 +321,7 @@ export class Visual implements IVisual {
   }
 
   /**
-   * Renders Chart 1: The difference series with OU forecast (if the series is stationary).
+   * Renders Chart 1: The difference series with OU forecast if the diff series is stationary.
    */
   private renderDiffChart(isStationary: boolean) {
     this.svgChart1.selectAll("*").remove();
@@ -369,7 +372,7 @@ export class Visual implements IVisual {
       .attr("d", lineGen);
 
     if (isStationary) {
-      // Estimate OU parameters on diff series.
+      // Estimate OU parameters.
       const n = this.diffSeries.length - 1;
       const diffValues = this.diffSeries.map(d => d.diff);
       const diffMean = d3.mean(diffValues)!;
@@ -441,7 +444,7 @@ export class Visual implements IVisual {
   }
 
   /**
-   * Renders Chart 2: Dual-line chart for the ERROR series of each bond.
+   * Renders Chart 2: Dual-line chart for ERROR series for each bond.
    */
   private renderDualChart(selectedIsin1: string, selectedIsin2: string) {
     this.svgChart2.selectAll("*").remove();
