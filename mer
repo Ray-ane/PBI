@@ -73,15 +73,15 @@ export class Visual implements IVisual {
                 <select id="pairDropdown"></select>
             </div>
             <div id="slider-container">
-                <div>
-                    <label for="lambdaSlider">Lambda Factor:</label>
-                    <input id="lambdaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
-                    <span id="lambdaValue">1.0</span>
-                </div>
-                <div>
-                    <label for="sigmaSlider">Sigma Factor:</label>
-                    <input id="sigmaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
-                    <span id="sigmaValue">1.0</span>
+            <div>
+                <label for="lambdaSlider">Lambda Factor:</label>
+                <input id="lambdaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+                <span id="lambdaValue">1.0</span>
+            </div>
+            <div>
+                <label for="sigmaSlider">Sigma Factor:</label>
+                <input id="sigmaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+                <span id="sigmaValue">1.0</span>
                 </div>
             </div>
         `;
@@ -114,16 +114,16 @@ export class Visual implements IVisual {
         // Create a tooltip div.
         if (d3.select(this.target).select("div.tooltip").empty()) {
             d3.select(this.target)
-                .append("div")
-                .attr("class", "tooltip")
-                .style("position", "absolute")
-                .style("pointer-events", "none")
-                .style("opacity", "0")
-                .style("background", "#fff")
-                .style("border", "1px solid #ccc")
-                .style("padding", "5px")
-                .style("border-radius", "3px")
-                .style("font-size", "12px");
+              .append("div")
+              .attr("class", "tooltip")
+              .style("position", "absolute")
+              .style("pointer-events", "none")
+              .style("opacity", "0")
+              .style("background", "#fff")
+              .style("border", "1px solid #ccc")
+              .style("padding", "5px")
+              .style("border-radius", "3px")
+              .style("font-size", "12px");
         }
     }
 
@@ -329,8 +329,8 @@ export class Visual implements IVisual {
         const height = this.currentViewport.height || 300;
         this.svg.attr("width", width).attr("height", height);
 
-        // Define margins
-        const margin = { top: 40, right: 30, bottom: 60, left: 50 };
+        // Define margins with more space for x-axis
+        const margin = { top: 40, right: 30, bottom: 80, left: 50 };
         const innerWidth = width - margin.left - margin.right;
         const innerHeight = height - margin.top - margin.bottom;
 
@@ -365,7 +365,7 @@ export class Visual implements IVisual {
 
         // Create axes
         const xAxis = d3.axisBottom(xScale)
-            .tickFormat(d3.timeFormat("%b %d, %Y"))
+            .tickFormat(d3.timeFormat("%Y-%m-%d"))
             .ticks(Math.max(2, Math.floor(innerWidth / 100)));
 
         const yAxis = d3.axisLeft(yScale);
@@ -379,7 +379,8 @@ export class Visual implements IVisual {
         xAxisGroup.selectAll("text")
             .attr("transform", "rotate(-45)")
             .style("text-anchor", "end")
-            .style("font-size", "10px");
+            .style("font-size", "10px")
+            .style("fill", "black"); // Ensure text is visible
 
         g.append("g")
             .call(yAxis);
@@ -452,7 +453,8 @@ export class Visual implements IVisual {
             let upperBoundPoints: DiffPoint[] = [];
             let lowerBoundPoints: DiffPoint[] = [];
 
-            for (let i = 1; i <= forecastSteps; i++) {
+            // Start forecast from the last historical point
+            for (let i = 0; i <= forecastSteps; i++) {
                 const nextDate = new Date(lastTime + i * delta);
                 const meanForecast = this.muHat + (lastDiff - this.muHat) * Math.pow(alpha, i);
                 const varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2 * i));
@@ -464,12 +466,6 @@ export class Visual implements IVisual {
             }
 
             // Draw confidence interval
-            const areaGen = d3.area<DiffPoint>()
-                .x(d => xScale(d.inputdate))
-                .y0(d => yScale(d.diff))
-                .y1(d => yScale(d.diff))
-                .curve(d3.curveMonotoneX);
-
             g.append("path")
                 .datum(upperBoundPoints)
                 .attr("fill", "none")
