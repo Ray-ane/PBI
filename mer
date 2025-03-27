@@ -89,6 +89,19 @@ export class Visual implements IVisual {
         `;
         this.target.appendChild(controlContainer);
 
+        // Create tooltip div
+        const tooltip = document.createElement("div");
+        tooltip.id = "tooltip";
+        tooltip.style.position = "absolute";
+        tooltip.style.padding = "8px";
+        tooltip.style.background = "rgba(255, 255, 255, 0.9)";
+        tooltip.style.border = "1px solid #ddd";
+        tooltip.style.borderRadius = "4px";
+        tooltip.style.pointerEvents = "none";
+        tooltip.style.fontSize = "12px";
+        tooltip.style.zIndex = "1000";
+        this.target.appendChild(tooltip);
+
         // Get references for controls.
         this.dropdownPairs = document.getElementById("pairDropdown") as HTMLSelectElement;
         this.lambdaSlider = document.getElementById("lambdaSlider") as HTMLInputElement;
@@ -96,7 +109,6 @@ export class Visual implements IVisual {
 
         // Attach event listeners.
         this.dropdownPairs.addEventListener("change", () => {
-            // console.log("Dropdown changed. Selected pair:", this.dropdownPairs.value);
             this.updateChartsInner();
         });
         this.lambdaSlider.addEventListener("input", () => {
@@ -438,6 +450,22 @@ export class Visual implements IVisual {
             .y(d => yScale(d.diff))
             .curve(d3.curveMonotoneX);
 
+        // Create tooltip behavior
+        const tooltip = d3.select("#tooltip");
+        const bisectDate = d3.bisector<DiffPoint, Date>(d => d.inputdate).left;
+
+        const showTooltip = (event: MouseEvent, d: DiffPoint) => {
+            tooltip
+                .style("opacity", 1)
+                .style("left", (event.pageX + 10) + "px")
+                .style("top", (event.pageY - 10) + "px")
+                .html(`Date: ${d.inputdate.toLocaleDateString()}<br/>Value: ${d.diff.toFixed(4)}`);
+        };
+
+        const hideTooltip = () => {
+            tooltip.style("opacity", 0);
+        };
+
         if (isStationary) {
             // Calculate OU parameters and forecast
             const ouResults = this.calculateOUParameters(
@@ -523,6 +551,44 @@ export class Visual implements IVisual {
                 .attr("stroke-width", 2)
                 .style("stroke-dasharray", "0")
                 .attr("d", lineGen);
+
+            // Add invisible overlay for tooltip interaction
+            const overlay = g.append("rect")
+                .attr("width", innerWidth)
+                .attr("height", innerHeight)
+                .style("fill", "none")
+                .style("pointer-events", "all");
+
+            // Add tooltip interaction
+            overlay
+                .on("mousemove", (event) => {
+                    const mouseX = xScale.invert(d3.pointer(event)[0]);
+                    const index = bisectDate(this.diffSeries, mouseX);
+                    const d = this.diffSeries[index];
+                    if (d) {
+                        showTooltip(event, d);
+                    }
+                })
+                .on("mouseout", hideTooltip);
+
+            // Add tooltip interaction to forecast line
+            g.append("path")
+                .datum(ouResults.forecastPoints)
+                .attr("fill", "none")
+                .attr("stroke", "orange")
+                .attr("stroke-width", 2)
+                .style("stroke-dasharray", "0")
+                .attr("d", lineGen)
+                .style("pointer-events", "all")
+                .on("mousemove", (event) => {
+                    const mouseX = xScale.invert(d3.pointer(event)[0]);
+                    const index = bisectDate(ouResults.forecastPoints, mouseX);
+                    const d = ouResults.forecastPoints[index];
+                    if (d) {
+                        showTooltip(event, d);
+                    }
+                })
+                .on("mouseout", hideTooltip);
         } else {
             // Create scales for historical data only
             xScale = d3.scaleTime()
@@ -557,6 +623,25 @@ export class Visual implements IVisual {
                 .style("fill", "red")
                 .style("font-size", "12px")
                 .text("ADF failed: Series non-stationary. OU not applied.");
+
+            // Add invisible overlay for tooltip interaction
+            const overlay = g.append("rect")
+                .attr("width", innerWidth)
+                .attr("height", innerHeight)
+                .style("fill", "none")
+                .style("pointer-events", "all");
+
+            // Add tooltip interaction
+            overlay
+                .on("mousemove", (event) => {
+                    const mouseX = xScale.invert(d3.pointer(event)[0]);
+                    const index = bisectDate(this.diffSeries, mouseX);
+                    const d = this.diffSeries[index];
+                    if (d) {
+                        showTooltip(event, d);
+                    }
+                })
+                .on("mouseout", hideTooltip);
         }
 
         // Dynamically determine tick count
