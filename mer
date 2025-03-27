@@ -141,16 +141,35 @@ export class Visual implements IVisual {
         const rows = dataView.table.rows;
         if (!rows || rows.length === 0) return;
 
-        // Parse all rows (do not filter out any row).
+        // Parse all rows with date validation
         let parsed: DataRow[] = [];
         rows.forEach((row: any[]) => {
-            const dateVal = new Date(row[0]);
+            // Ensure date is properly parsed
+            let dateVal: Date;
+            if (row[0] instanceof Date) {
+                dateVal = row[0];
+            } else if (typeof row[0] === 'string') {
+                // Try parsing string date
+                dateVal = new Date(row[0]);
+                if (isNaN(dateVal.getTime())) {
+                    console.error("Invalid date format:", row[0]);
+                    return;
+                }
+            } else if (typeof row[0] === 'number') {
+                // Handle timestamp
+                dateVal = new Date(row[0]);
+            } else {
+                console.error("Unsupported date format:", row[0]);
+                return;
+            }
+
             const context1 = row[1] ? row[1].toString() : "";
             const isin1 = row[2] ? row[2].toString() : "";
             const isin2 = row[3] ? row[3].toString() : "";
             const bond1 = row[4] ? row[4].toString() : "";
             const bond2 = row[5] ? row[5].toString() : "";
             const err = +row[6];
+
             parsed.push({
                 inputdate: dateVal,
                 context1: context1,
@@ -161,7 +180,18 @@ export class Visual implements IVisual {
                 error: err
             });
         });
-        console.log("Parsed Data (all rows):", parsed);
+
+        // Log date range for debugging
+        if (parsed.length > 0) {
+            const minDate = d3.min(parsed, d => d.inputdate);
+            const maxDate = d3.max(parsed, d => d.inputdate);
+            console.log("Date range:", {
+                min: minDate?.toISOString(),
+                max: maxDate?.toISOString(),
+                totalPoints: parsed.length
+            });
+        }
+
         parsed.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
         this.allData = parsed;
 
@@ -313,6 +343,13 @@ export class Visual implements IVisual {
                 .text("No data to display.");
             return;
         }
+
+        // Log the date range for debugging
+        console.log("Chart date range:", {
+            min: this.diffSeries[0].inputdate.toISOString(),
+            max: this.diffSeries[this.diffSeries.length - 1].inputdate.toISOString(),
+            totalPoints: this.diffSeries.length
+        });
 
         const xScale = d3.scaleTime()
             .domain([this.diffSeries[0].inputdate, this.diffSeries[this.diffSeries.length - 1].inputdate])
