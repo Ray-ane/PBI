@@ -533,28 +533,36 @@ export class Visual implements IVisual {
                 .text("ADF failed: Series non-stationary. OU not applied.");
         }
 
-        // Add axes
+        // Dynamically determine tick count
+        const tickCount = Math.max(2, Math.floor(innerWidth / 80));
+        
+        // Create and add x-axis with improved formatting
         const xAxis = d3.axisBottom(xScale)
-            .tickFormat(d3.timeFormat("%Y-%m-%d"))
-            .ticks(Math.max(3, Math.floor(innerWidth / 100)));
-
-        const yAxis = d3.axisLeft(yScale);
-
-        // Add x-axis
-        g.append("g")
+            .ticks(tickCount)
+            .tickFormat(d3.timeFormat("%b %d, %Y"));
+            
+        const xAxisGroup = g.append("g")
             .attr("transform", `translate(0, ${innerHeight})`)
-            .call(xAxis)
-            .selectAll("text")
-            .attr("transform", "rotate(-45)")
-            .style("text-anchor", "end")
-            .style("font-size", "10px")
-            .style("fill", "#666")
-            .attr("dy", "0.71em")
-            .attr("dx", "-0.71em");
+            .call(xAxis);
+
+        // Rotate labels only for narrow charts
+        if (innerWidth < 300) {
+            xAxisGroup.selectAll("text")
+                .attr("transform", "rotate(-45)")
+                .style("text-anchor", "end")
+                .style("font-size", "10px")
+                .style("fill", "#666")
+                .attr("dy", "0.71em")
+                .attr("dx", "-0.71em");
+        } else {
+            xAxisGroup.selectAll("text")
+                .style("font-size", "10px")
+                .style("fill", "#666");
+        }
 
         // Add y-axis
         g.append("g")
-            .call(yAxis)
+            .call(d3.axisLeft(yScale))
             .selectAll("text")
             .style("font-size", "10px")
             .style("fill", "#666");
