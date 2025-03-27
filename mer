@@ -1,3 +1,9 @@
+/**
+ * Power BI Custom Visual for Ornstein-Uhlenbeck Process Estimation
+ * This visual analyzes the difference between two bond error series and applies
+ * the Ornstein-Uhlenbeck process when the series is stationary.
+ */
+
 "use strict";
 import "./../style/visual.less";
 import * as d3 from "d3";
@@ -8,8 +14,8 @@ import VisualUpdateOptions = powerbiVisualsApi.extensibility.visual.VisualUpdate
 import DataView = powerbiVisualsApi.DataView;
 
 /**
- * Data schema:
- *  inputdate, context1, isin1, isin2, Bond1, Bond2, Error
+ * Interface representing a single row of input data
+ * Contains date, context, bond identifiers, and error value
  */
 interface DataRow {
     inputdate: Date;
@@ -21,45 +27,41 @@ interface DataRow {
     error: number;
 }
 
-/** For the difference series (Error for Bond1 minus Error for Bond2) */
+/**
+ * Interface for the difference series points
+ * Represents the difference between two bond error values at a specific date
+ */
 interface DiffPoint {
     inputdate: Date;
     diff: number;
 }
 
 export class Visual implements IVisual {
+    // DOM Elements
     private target: HTMLElement;
     private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
-
-    // Dropdown for pair selection (formatted as "isin1||isin2")
     private dropdownPairs: HTMLSelectElement;
-
-    // All parsed data.
-    private allData: DataRow[] = [];
-
-    // Computed difference series.
-    private diffSeries: DiffPoint[] = [];
-
-    // OU parameters computed from the diff series.
-    private lambdaHat: number = 0;
-    private muHat: number = 0;
-    private sigmaHat: number = 0;
-    private delta: number = 1; // time step in ms computed from dates
-
-    // OU scaling sliders.
     private lambdaSlider: HTMLInputElement;
     private sigmaSlider: HTMLInputElement;
 
-    // Current viewport dimensions.
-    private currentViewport: { width: number; height: number } = { width: 600, height: 300 };
+    // Data Storage
+    private allData: DataRow[] = [];
+    private diffSeries: DiffPoint[] = [];
 
-    // Flag indicating if the diff series passed the ADF test.
+    // Ornstein-Uhlenbeck Parameters
+    private lambdaHat: number = 0;  // Mean reversion speed
+    private muHat: number = 0;      // Long-term mean
+    private sigmaHat: number = 0;   // Volatility
+    private delta: number = 1;      // Time step in milliseconds
+
+    // Viewport Configuration
+    private currentViewport: { width: number; height: number } = { width: 600, height: 300 };
     private diffSeriesStationary: boolean = false;
 
-    // Chart margins.
-    private margin: { top: number; right: number; bottom: number; left: number } =
-        { top: 20, right: 30, bottom: 50, left: 50 };
-
+    /**
+     * Constructor: Initializes the visual with controls and event listeners
+     * @param options - Visual constructor options from Power BI
+     */
     constructor(options: VisualConstructorOptions) {
         this.target = options.element;
         this.target.innerHTML = "";
@@ -94,7 +96,7 @@ export class Visual implements IVisual {
 
         // Attach event listeners.
         this.dropdownPairs.addEventListener("change", () => {
-            console.log("Dropdown changed. Selected pair:", this.dropdownPairs.value);
+            // console.log("Dropdown changed. Selected pair:", this.dropdownPairs.value);
             this.updateChartsInner();
         });
         this.lambdaSlider.addEventListener("input", () => {
@@ -112,6 +114,11 @@ export class Visual implements IVisual {
             .classed("ou-estimation-visual", true);
     }
 
+    /**
+     * Main update method called by Power BI when data changes
+     * Processes input data and updates the visualization
+     * @param options - Update options containing data and viewport information
+     */
     public update(options: VisualUpdateOptions) {
         const dataView: DataView = options.dataViews && options.dataViews[0];
         if (!dataView || !dataView.table) return;
@@ -137,14 +144,14 @@ export class Visual implements IVisual {
                 // Try parsing string date
                 dateVal = new Date(row[0]);
                 if (isNaN(dateVal.getTime())) {
-                    console.error("Invalid date format:", row[0]);
+                    // console.error("Invalid date format:", row[0]);
                     return;
                 }
             } else if (typeof row[0] === 'number') {
                 // Handle timestamp
                 dateVal = new Date(row[0]);
             } else {
-                console.error("Unsupported date format:", row[0]);
+                // console.error("Unsupported date format:", row[0]);
                 return;
             }
 
@@ -170,11 +177,11 @@ export class Visual implements IVisual {
         if (parsed.length > 0) {
             const minDate = d3.min(parsed, d => d.inputdate);
             const maxDate = d3.max(parsed, d => d.inputdate);
-            console.log("Date range:", {
-                min: minDate?.toISOString(),
-                max: maxDate?.toISOString(),
-                totalPoints: parsed.length
-            });
+            // console.log("Date range:", {
+            //     min: minDate?.toISOString(),
+            //     max: maxDate?.toISOString(),
+            //     totalPoints: parsed.length
+            // });
         }
 
         parsed.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
@@ -182,7 +189,7 @@ export class Visual implements IVisual {
 
         // Use rows where context1 is "P_VALUE" (normalized) to populate the dropdown.
         const pValueRows = parsed.filter(d => d.context1.trim().toUpperCase() === "P_VALUE");
-        console.log("P_VALUE Rows:", pValueRows);
+        // console.log("P_VALUE Rows:", pValueRows);
         if (pValueRows.length === 0) {
             this.dropdownPairs.options.length = 0;
             this.svg.selectAll("*").remove();
@@ -192,9 +199,9 @@ export class Visual implements IVisual {
         // Find the latest date (by day) among P_VALUE rows.
         const maxDateMs = d3.max(pValueRows, d => d.inputdate.getTime())!;
         const maxDateObj = new Date(maxDateMs);
-        console.log("Latest P_VALUE Date:", maxDateObj);
+        // console.log("Latest P_VALUE Date:", maxDateObj);
         const latestRows = pValueRows.filter(d => d.inputdate.toDateString() === maxDateObj.toDateString());
-        console.log("Latest P_VALUE Rows (same day):", latestRows);
+        // console.log("Latest P_VALUE Rows (same day):", latestRows);
 
         // Build unique pairs from latestRows using bond1 and bond2.
         const pairSet = new Set<string>();
@@ -203,7 +210,7 @@ export class Visual implements IVisual {
             pairSet.add(pairKey);
         });
         const uniquePairs = Array.from(pairSet);
-        console.log("Unique Pairs:", uniquePairs);
+        // console.log("Unique Pairs:", uniquePairs);
 
         // Populate the dropdown.
         this.dropdownPairs.options.length = 0;
@@ -222,6 +229,10 @@ export class Visual implements IVisual {
         this.updateChartsInner();
     }
 
+    /**
+     * Updates the chart based on selected bond pair and slider values
+     * Computes difference series and applies ADF test
+     */
     private updateChartsInner() {
         if (this.dropdownPairs.options.length === 0) return;
         const selectedPair = this.dropdownPairs.value;
@@ -272,6 +283,11 @@ export class Visual implements IVisual {
         this.renderChart(adfPassed);
     }
 
+    /**
+     * Performs Augmented Dickey-Fuller test for stationarity
+     * @param data - Time series data to test
+     * @returns boolean indicating if the series is stationary
+     */
     private performADFTest(data: number[]): boolean {
         if (data.length < 3) return false;
         
@@ -297,6 +313,12 @@ export class Visual implements IVisual {
         return tStat < -3;
     }
 
+    /**
+     * Calculates Ornstein-Uhlenbeck process parameters and generates forecasts
+     * @param diffValues - Difference series values
+     * @param dates - Corresponding dates
+     * @returns Object containing OU parameters and forecast points
+     */
     private calculateOUParameters(diffValues: number[], dates: Date[]): { 
         lambda: number, 
         mu: number, 
@@ -372,6 +394,10 @@ export class Visual implements IVisual {
         };
     }
 
+    /**
+     * Renders the chart with historical data and forecasts
+     * @param isStationary - Flag indicating if the series passed ADF test
+     */
     private renderChart(isStationary: boolean) {
         // Clear previous chart
         this.svg.selectAll("*").remove();
