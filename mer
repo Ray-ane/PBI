@@ -67,7 +67,7 @@ export class Visual implements IVisual {
         // Create a container for controls (dropdown and sliders).
         const controlContainer = document.createElement("div");
         controlContainer.id = "control-container";
-        controlContainer.style.marginBottom = "20px"; // Add space between controls and chart
+        controlContainer.style.marginBottom = "20px";
         controlContainer.innerHTML = `
             <div id="dropdown-container">
                 <label for="pairDropdown">Select Pair (isin1||isin2):</label>
@@ -107,33 +107,10 @@ export class Visual implements IVisual {
             this.updateChartsInner();
         });
 
-        // Create a container for the chart
-        const chartContainer = document.createElement("div");
-        chartContainer.id = "chart-container";
-        chartContainer.style.width = "100%";
-        chartContainer.style.height = "calc(100% - 100px)"; // Leave space for controls
-        this.target.appendChild(chartContainer);
-
         // Create the SVG container for the chart
-        this.svg = d3.select(chartContainer)
+        this.svg = d3.select(this.target)
             .append("svg")
-            .classed("ou-estimation-visual", true)
-            .style("width", "100%")
-            .style("height", "100%");
-
-        // Create a tooltip div
-        const tooltip = d3.select(this.target)
-            .append("div")
-            .attr("class", "tooltip")
-            .style("position", "absolute")
-            .style("pointer-events", "none")
-            .style("opacity", "0")
-            .style("background", "#fff")
-            .style("border", "1px solid #ccc")
-            .style("padding", "5px")
-            .style("border-radius", "3px")
-            .style("font-size", "12px")
-            .style("z-index", "1000"); // Ensure tooltip is above other elements
+            .classed("ou-estimation-visual", true);
     }
 
     public update(options: VisualUpdateOptions) {
@@ -329,6 +306,87 @@ export class Visual implements IVisual {
         return tStat < -3;
     }
 
+    private calculateOUParameters(diffValues: number[], dates: Date[]): { 
+        lambda: number, 
+        mu: number, 
+        sigma: number,
+        forecastPoints: DiffPoint[],
+        upperBoundPoints: DiffPoint[],
+        lowerBoundPoints: DiffPoint[]
+    } {
+        const n = diffValues.length - 1;
+        const diffMean = d3.mean(diffValues)!;
+        
+        // Calculate alpha
+        let num = 0, den = 0;
+        for (let i = 0; i < n; i++) {
+            num += (diffValues[i + 1] - diffMean) * (diffValues[i] - diffMean);
+            den += Math.pow(diffValues[i] - diffMean, 2);
+        }
+        let alphaHat = num / den;
+        alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
+
+        // Calculate time parameters
+        const firstTime = dates[0].getTime();
+        const lastTime = dates[dates.length - 1].getTime();
+        const delta = (lastTime - firstTime) / n;
+        const deltaDays = delta / (1000 * 60 * 60 * 24);
+
+        // Calculate OU parameters
+        const lambdaHat = -Math.log(alphaHat) / deltaDays;
+        
+        // Calculate mu
+        let sumResidual = 0;
+        for (let i = 0; i < n; i++) {
+            sumResidual += diffValues[i + 1] - alphaHat * diffValues[i];
+        }
+        const muHat = sumResidual / (n * (1 - alphaHat));
+
+        // Calculate sigma
+        let sumSq = 0;
+        for (let i = 0; i < n; i++) {
+            const r = diffValues[i + 1] - alphaHat * diffValues[i] - (1 - alphaHat) * muHat;
+            sumSq += r * r;
+        }
+        const sigmaSqHat = (2 * lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
+        const sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
+
+        // Apply slider scaling
+        const lambdaFactor = parseFloat(this.lambdaSlider.value);
+        const sigmaFactor = parseFloat(this.sigmaSlider.value);
+        const newLambda = lambdaHat * lambdaFactor;
+        const newSigma = sigmaHat * sigmaFactor;
+        const alpha = Math.exp(-newLambda * deltaDays);
+
+        // Generate forecast points
+        const lastDiff = diffValues[diffValues.length - 1];
+        const forecastSteps = 30;
+        let forecastPoints: DiffPoint[] = [];
+        let upperBoundPoints: DiffPoint[] = [];
+        let lowerBoundPoints: DiffPoint[] = [];
+
+        // Start forecast from the last historical point
+        for (let i = 0; i <= forecastSteps; i++) {
+            const nextDate = new Date(lastTime + i * delta);
+            const meanForecast = muHat + (lastDiff - muHat) * Math.pow(alpha, i);
+            const varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2 * i));
+            const stdDev = Math.sqrt(varForecast);
+            
+            forecastPoints.push({ inputdate: nextDate, diff: meanForecast });
+            upperBoundPoints.push({ inputdate: nextDate, diff: meanForecast + 1.96 * stdDev });
+            lowerBoundPoints.push({ inputdate: nextDate, diff: meanForecast - 1.96 * stdDev });
+        }
+
+        return {
+            lambda: newLambda,
+            mu: muHat,
+            sigma: newSigma,
+            forecastPoints,
+            upperBoundPoints,
+            lowerBoundPoints
+        };
+    }
+
     private renderChart(isStationary: boolean) {
         // Clear previous chart
         this.svg.selectAll("*").remove();
@@ -338,8 +396,8 @@ export class Visual implements IVisual {
         const height = this.currentViewport.height;
         this.svg.attr("width", width).attr("height", height);
 
-        // Define margins with more space for x-axis
-        const margin = { top: 40, right: 30, bottom: 80, left: 50 };
+        // Define margins
+        const margin = { top: 40, right: 30, bottom: 60, left: 50 };
         const innerWidth = width - margin.left - margin.right;
         const innerHeight = height - margin.top - margin.bottom;
 
@@ -359,21 +417,9 @@ export class Visual implements IVisual {
             return;
         }
 
-        // Create scales
-        const xScale = d3.scaleTime()
-            .domain([
-                d3.min(this.diffSeries, d => d.inputdate)!,
-                d3.max(this.diffSeries, d => d.inputdate)!
-            ])
-            .range([0, innerWidth]);
-
-        const yScale = d3.scaleLinear()
-            .domain([
-                d3.min(this.diffSeries, d => d.diff) as number,
-                d3.max(this.diffSeries, d => d.diff) as number
-            ])
-            .range([innerHeight, 0])
-            .nice();
+        // Declare scales
+        let xScale: d3.ScaleTime<number, number>;
+        let yScale: d3.ScaleLinear<number, number>;
 
         // Create line generator
         const lineGen = d3.line<DiffPoint>()
@@ -381,89 +427,34 @@ export class Visual implements IVisual {
             .y(d => yScale(d.diff))
             .curve(d3.curveMonotoneX);
 
-        // Draw historical line
-        g.append("path")
-            .datum(this.diffSeries)
-            .attr("fill", "none")
-            .attr("stroke", "#00818F")
-            .attr("stroke-width", 2)
-            .attr("d", lineGen);
-
         if (isStationary) {
-            // Calculate OU parameters
-            const n = this.diffSeries.length - 1;
-            const diffValues = this.diffSeries.map(d => d.diff);
-            const diffMean = d3.mean(diffValues)!;
-            
-            // Calculate alpha
-            let num = 0, den = 0;
-            for (let i = 0; i < n; i++) {
-                num += (diffValues[i + 1] - diffMean) * (diffValues[i] - diffMean);
-                den += Math.pow(diffValues[i] - diffMean, 2);
-            }
-            let alphaHat = num / den;
-            alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
+            // Calculate OU parameters and forecast
+            const ouResults = this.calculateOUParameters(
+                this.diffSeries.map(d => d.diff),
+                this.diffSeries.map(d => d.inputdate)
+            );
 
-            // Calculate time parameters
-            const firstTime = this.diffSeries[0].inputdate.getTime();
-            const lastTime = this.diffSeries[this.diffSeries.length - 1].inputdate.getTime();
-            const delta = (lastTime - firstTime) / n;
-            const deltaDays = delta / (1000 * 60 * 60 * 24);
+            // Combine historical and forecast data for scales
+            const allX = this.diffSeries.map(d => d.inputdate)
+                .concat(ouResults.forecastPoints.map(d => d.inputdate));
+            const allY = this.diffSeries.map(d => d.diff)
+                .concat(ouResults.forecastPoints.map(d => d.diff))
+                .concat(ouResults.upperBoundPoints.map(d => d.diff))
+                .concat(ouResults.lowerBoundPoints.map(d => d.diff));
 
-            // Calculate OU parameters
-            this.lambdaHat = -Math.log(alphaHat) / deltaDays;
-            
-            // Calculate mu
-            let sumResidual = 0;
-            for (let i = 0; i < n; i++) {
-                sumResidual += diffValues[i + 1] - alphaHat * diffValues[i];
-            }
-            this.muHat = sumResidual / (n * (1 - alphaHat));
+            // Create scales with combined data
+            xScale = d3.scaleTime()
+                .domain([d3.min(allX) as Date, d3.max(allX) as Date])
+                .range([0, innerWidth]);
 
-            // Calculate sigma
-            let sumSq = 0;
-            for (let i = 0; i < n; i++) {
-                const r = diffValues[i + 1] - alphaHat * diffValues[i] - (1 - alphaHat) * this.muHat;
-                sumSq += r * r;
-            }
-            const sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
-            this.sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
+            yScale = d3.scaleLinear()
+                .domain([d3.min(allY) as number, d3.max(allY) as number])
+                .range([innerHeight, 0])
+                .nice();
 
-            // Apply slider scaling
-            const lambdaFactor = parseFloat(this.lambdaSlider.value);
-            const sigmaFactor = parseFloat(this.sigmaSlider.value);
-            const newLambda = this.lambdaHat * lambdaFactor;
-            const newSigma = this.sigmaHat * sigmaFactor;
-            const alpha = Math.exp(-newLambda * deltaDays);
-
-            // Generate forecast points
-            const lastDiff = this.diffSeries[this.diffSeries.length - 1].diff;
-            const forecastSteps = 30;
-            let forecastPoints: DiffPoint[] = [];
-            let upperBoundPoints: DiffPoint[] = [];
-            let lowerBoundPoints: DiffPoint[] = [];
-
-            // Start forecast from the last historical point
-            for (let i = 0; i <= forecastSteps; i++) {
-                const nextDate = new Date(lastTime + i * delta);
-                const meanForecast = this.muHat + (lastDiff - this.muHat) * Math.pow(alpha, i);
-                const varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2 * i));
-                const stdDev = Math.sqrt(varForecast);
-                
-                forecastPoints.push({ inputdate: nextDate, diff: meanForecast });
-                upperBoundPoints.push({ inputdate: nextDate, diff: meanForecast + 1.96 * stdDev });
-                lowerBoundPoints.push({ inputdate: nextDate, diff: meanForecast - 1.96 * stdDev });
-            }
-
-            // Update x-scale domain to include forecast
-            xScale.domain([
-                d3.min(this.diffSeries, d => d.inputdate)!,
-                d3.max(forecastPoints, d => d.inputdate)!
-            ]);
-
-            // Draw confidence interval
+            // Draw forecast confidence bands (dashed grey)
             g.append("path")
-                .datum(upperBoundPoints)
+                .datum(ouResults.lowerBoundPoints)
                 .attr("fill", "none")
                 .attr("stroke", "grey")
                 .attr("stroke-width", 1)
@@ -471,19 +462,29 @@ export class Visual implements IVisual {
                 .attr("d", lineGen);
 
             g.append("path")
-                .datum(lowerBoundPoints)
+                .datum(ouResults.upperBoundPoints)
                 .attr("fill", "none")
                 .attr("stroke", "grey")
                 .attr("stroke-width", 1)
                 .style("stroke-dasharray", "3,3")
                 .attr("d", lineGen);
 
-            // Draw forecast line
+            // Draw forecast mean line (solid orange)
             g.append("path")
-                .datum(forecastPoints)
+                .datum(ouResults.forecastPoints)
                 .attr("fill", "none")
                 .attr("stroke", "orange")
                 .attr("stroke-width", 2)
+                .style("stroke-dasharray", "0")
+                .attr("d", lineGen);
+
+            // Draw historical data line (solid, color #00818F)
+            g.append("path")
+                .datum(this.diffSeries)
+                .attr("fill", "none")
+                .attr("stroke", "#00818F")
+                .attr("stroke-width", 2)
+                .style("stroke-dasharray", "0")
                 .attr("d", lineGen);
 
             // Add status text
@@ -495,6 +496,31 @@ export class Visual implements IVisual {
                 .style("font-size", "12px")
                 .text("ADF passed: Series stationary. OU applied.");
         } else {
+            // Create scales for historical data only
+            xScale = d3.scaleTime()
+                .domain([
+                    d3.min(this.diffSeries, d => d.inputdate)!,
+                    d3.max(this.diffSeries, d => d.inputdate)!
+                ])
+                .range([0, innerWidth]);
+
+            yScale = d3.scaleLinear()
+                .domain([
+                    d3.min(this.diffSeries, d => d.diff) as number,
+                    d3.max(this.diffSeries, d => d.diff) as number
+                ])
+                .range([innerHeight, 0])
+                .nice();
+
+            // Draw historical data line (solid, color #00818F)
+            g.append("path")
+                .datum(this.diffSeries)
+                .attr("fill", "none")
+                .attr("stroke", "#00818F")
+                .attr("stroke-width", 2)
+                .style("stroke-dasharray", "0")
+                .attr("d", lineGen);
+
             // Add status text
             g.append("text")
                 .attr("x", innerWidth / 2)
