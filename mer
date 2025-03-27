@@ -196,10 +196,10 @@ export class Visual implements IVisual {
         const latestRows = pValueRows.filter(d => d.inputdate.toDateString() === maxDateObj.toDateString());
         console.log("Latest P_VALUE Rows (same day):", latestRows);
 
-        // Build unique pairs from latestRows using isin1 and isin2.
+        // Build unique pairs from latestRows using bond1 and bond2.
         const pairSet = new Set<string>();
         latestRows.forEach(row => {
-            const pairKey = `${row.isin1}||${row.isin2}`;
+            const pairKey = `${row.bond1}||${row.bond2}`;
             pairSet.add(pairKey);
         });
         const uniquePairs = Array.from(pairSet);
@@ -225,8 +225,8 @@ export class Visual implements IVisual {
         if (this.dropdownPairs.options.length === 0) return;
         const selectedPair = this.dropdownPairs.value;
         if (!selectedPair) return;
-        const [selectedIsin1, selectedIsin2] = selectedPair.split("||");
-        console.log("Selected Pair:", selectedIsin1, selectedIsin2);
+        const [selectedBond1, selectedBond2] = selectedPair.split("||");
+        console.log("Selected Pair:", selectedBond1, selectedBond2);
 
         // Filter rows with context1 === "ERROR" (normalized).
         const errorRows = this.allData.filter(d => d.context1.trim().toUpperCase() === "ERROR");
@@ -234,13 +234,13 @@ export class Visual implements IVisual {
 
         // Build maps for each bond (using day-level keys).
         const mapBond1 = new Map<string, number>();
-        errorRows.filter(d => d.isin1.trim() === selectedIsin1.trim())
+        errorRows.filter(d => d.bond1.trim() === selectedBond1.trim())
             .forEach(d => {
                 const key = d.inputdate.toDateString();
                 mapBond1.set(key, d.error);
             });
         const mapBond2 = new Map<string, number>();
-        errorRows.filter(d => d.isin1.trim() === selectedIsin2.trim())
+        errorRows.filter(d => d.bond1.trim() === selectedBond2.trim())
             .forEach(d => {
                 const key = d.inputdate.toDateString();
                 mapBond2.set(key, d.error);
