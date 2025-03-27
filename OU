@@ -34,8 +34,7 @@ export class Visual implements IVisual {
   // Chart margins.
   private margin = { top: 20, right: 30, bottom: 50, left: 50 };
 
-  // Stored difference series and estimated OU parameters.
-  // Here, "data" will be an array of {x: Date, y: number} for the diff series.
+  // The processed difference series (historical data).
   private data: DiffPoint[] = [];
   private lambdaHat: number = 0;
   private muHat: number = 0;
@@ -50,12 +49,12 @@ export class Visual implements IVisual {
   private dropdownPairs: HTMLSelectElement;
 
   // Current viewport dimensions.
-  private currentViewport: { width: number; height: number } = { width: 600, height: 300 };
+  private currentViewport: { width: number, height: number } = { width: 600, height: 300 };
 
   // Flag indicating if the diff series passed the ADF test.
   private diffSeriesStationary: boolean = false;
 
-  // All parsed data from Power BI.
+  // All parsed data.
   private allData: DataRow[] = [];
 
   constructor(options: VisualConstructorOptions) {
@@ -135,14 +134,14 @@ export class Visual implements IVisual {
     if (!dataView || !dataView.table) return;
     this.currentViewport = options.viewport || { width: 600, height: 300 };
 
-    // Reset sliders.
+    // Reset sliders to default.
     this.lambdaSlider.value = "1.0";
     this.sigmaSlider.value = "1.0";
     document.getElementById("lambdaValue")!.innerText = "1.0";
     document.getElementById("sigmaValue")!.innerText = "1.0";
 
     const rows = dataView.table.rows;
-    if (!rows || rows.length === 0) return;
+    if (!rows || rows.length < 2) return;
 
     // Parse all rows.
     let parsed: DataRow[] = [];
@@ -168,7 +167,7 @@ export class Visual implements IVisual {
     parsed.sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
     this.allData = parsed;
 
-    // Populate dropdown using rows where context1 === "P_VALUE".
+    // Populate dropdown from rows with context1 === "P_VALUE" (normalized).
     const pValueRows = parsed.filter(d => d.context1.trim().toUpperCase() === "P_VALUE");
     console.log("P_VALUE Rows:", pValueRows);
     if (pValueRows.length === 0) {
@@ -176,6 +175,7 @@ export class Visual implements IVisual {
       this.svg.selectAll("*").remove();
       return;
     }
+    // Find latest date (by day) among P_VALUE rows.
     const maxDateMs = d3.max(pValueRows, d => d.inputdate.getTime())!;
     const maxDateObj = new Date(maxDateMs);
     console.log("Latest P_VALUE Date:", maxDateObj);
@@ -203,10 +203,10 @@ export class Visual implements IVisual {
   }
 
   /**
-   * updateChartInner() builds the difference series for the selected pair.
-   * It filters rows where context1 === "ERROR", builds day-level maps for each bond (using isin1),
-   * computes the difference series (Error for Bond1 minus Error for Bond2), applies the ADF test,
-   * and sets this.data as an array of { x: Date, y: number }.
+   * updateChartInner() filters rows where context1 === "ERROR" (normalized),
+   * builds day-level error series for each bond (using isin1),
+   * computes the difference series (Error for Bond1 minus Error for Bond2),
+   * applies the ADF test, and sets this.data.
    */
   private updateChartInner() {
     if (this.dropdownPairs.options.length === 0) return;
@@ -215,7 +215,7 @@ export class Visual implements IVisual {
     const [selectedIsin1, selectedIsin2] = selectedPair.split("||");
     console.log("Selected Pair:", selectedIsin1, selectedIsin2);
 
-    // Filter ERROR rows.
+    // Filter rows with context1 === "ERROR".
     const errorRows = this.allData.filter(d => d.context1.trim().toUpperCase() === "ERROR");
     console.log("ERROR Rows:", errorRows);
 
@@ -262,7 +262,7 @@ export class Visual implements IVisual {
   }
 
   /**
-   * A basic ADF test (no extra lags) on a numeric array.
+   * A basic ADF test (without extra lags) on a numeric array.
    * Returns true if the t-statistic is less than -3.
    */
   private performADFTest(data: number[]): boolean {
@@ -295,8 +295,8 @@ export class Visual implements IVisual {
   }
 
   /**
-   * Renders the chart exactly as in your provided code.
-   * Uses this.data (array of { x: Date, y: number }) to build historical and forecast series.
+   * Renders the chart exactly as in the provided sample code.
+   * Uses this.data (array of { x: Date, y: number }) for historical data.
    */
   private renderChart(options?: VisualUpdateOptions) {
     if (!this.data || this.data.length < 2) return;
@@ -360,7 +360,7 @@ export class Visual implements IVisual {
     const xAxisGroup = g.append("g")
       .attr("transform", `translate(0, ${innerHeight})`)
       .call(xAxis);
-    if (innerWidth < 300) {
+    if(innerWidth < 300) {
       xAxisGroup.selectAll("text")
         .attr("transform", "rotate(-45)")
         .style("text-anchor", "end");
