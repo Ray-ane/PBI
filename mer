@@ -321,122 +321,231 @@ export class Visual implements IVisual {
     }
 
     private renderChart(isStationary: boolean) {
-        if (!this.diffSeries || this.diffSeries.length < 2) return;
-        const viewport = this.currentViewport;
-        const lambdaSlider = document.getElementById("lambdaSlider") as HTMLInputElement;
-        const sigmaSlider = document.getElementById("sigmaSlider") as HTMLInputElement;
-        const lambdaFactor = parseFloat(lambdaSlider.value);
-        const sigmaFactor = parseFloat(sigmaSlider.value);
-        const newLambda = this.lambdaHat * lambdaFactor;
-        const newSigma = this.sigmaHat * sigmaFactor;
-        const deltaDays = this.delta / (1000 * 60 * 60 * 24);
-        const alpha = Math.exp(-newLambda * deltaDays);
-
+        // Clear previous chart
         this.svg.selectAll("*").remove();
-        const width = viewport.width || 300;
-        const height = viewport.height || 200;
+
+        // Set up dimensions
+        const width = Math.max(this.currentViewport.width, 600);
+        const height = Math.max(this.currentViewport.height, 300);
         this.svg.attr("width", width).attr("height", height);
-        const innerWidth = width - this.margin.left - this.margin.right;
-        const innerHeight = height - this.margin.top - this.margin.bottom;
 
+        // Define margins
+        const margin = { top: 40, right: 50, bottom: 100, left: 50 };
+        const innerWidth = width - margin.left - margin.right;
+        const innerHeight = height - margin.top - margin.bottom;
+
+        // Create main chart group
         const g = this.svg.append("g")
-            .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
+            .attr("transform", `translate(${margin.left}, ${margin.top})`);
 
-        // Forecast 50 steps ahead.
-        const forecastSteps = 50;
-        const lastPoint = this.diffSeries[this.diffSeries.length - 1];
-        let forecastPoints: { x: Date, mean: number, lower: number, upper: number }[] = [];
-        for (let i = 1; i <= forecastSteps; i++) {
-            const nextX = new Date(lastPoint.inputdate.getTime() + i * this.delta);
-            const mean = this.muHat + (lastPoint.diff - this.muHat) * Math.pow(alpha, i);
-            const varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2 * i));
-            const stdDev = Math.sqrt(varForecast);
-            const lower = mean - 1.96 * stdDev;
-            const upper = mean + 1.96 * stdDev;
-            forecastPoints.push({ x: nextX, mean, lower, upper });
+        // Check for data
+        if (this.diffSeries.length < 1) {
+            g.append("text")
+                .attr("x", innerWidth / 2)
+                .attr("y", innerHeight / 2)
+                .attr("text-anchor", "middle")
+                .attr("fill", "red")
+                .style("font-size", "14px")
+                .text("No data to display.");
+            return;
         }
-        const forecastMeanLine = forecastPoints.map(d => ({ x: d.x, y: d.mean }));
-        const forecastLowerLine = forecastPoints.map(d => ({ x: d.x, y: d.lower }));
-        const forecastUpperLine = forecastPoints.map(d => ({ x: d.x, y: d.upper }));
 
-        // Combine historical and forecast data for scales.
-        const allX = this.diffSeries.map(d => d.inputdate).concat(forecastMeanLine.map(d => d.x));
-        const allY = this.diffSeries.map(d => d.diff)
-            .concat(forecastMeanLine.map(d => d.y))
-            .concat(forecastLowerLine.map(d => d.y))
-            .concat(forecastUpperLine.map(d => d.y));
-
+        // Create scales
         const xScale = d3.scaleTime()
-            .domain([d3.min(allX) as Date, d3.max(allX) as Date])
+            .domain([
+                d3.min(this.diffSeries, d => d.inputdate)!,
+                d3.max(this.diffSeries, d => d.inputdate)!
+            ])
             .range([0, innerWidth]);
+
         const yScale = d3.scaleLinear()
-            .domain([d3.min(allY) as number, d3.max(allY) as number])
+            .domain([
+                d3.min(this.diffSeries, d => d.diff) as number,
+                d3.max(this.diffSeries, d => d.diff) as number
+            ])
             .range([innerHeight, 0])
             .nice();
 
-        // Dynamically determine tick count.
-        const tickCount = Math.max(2, Math.floor(innerWidth / 80));
-        const xAxis = d3.axisBottom(xScale)
-            .ticks(tickCount)
-            .tickFormat(d3.timeFormat("%b %d, %Y"));
-        const xAxisGroup = g.append("g")
-            .attr("transform", `translate(0, ${innerHeight})`)
-            .call(xAxis);
-        if(innerWidth < 300) {
-            xAxisGroup.selectAll("text")
-                .attr("transform", "rotate(-45)")
-                .style("text-anchor", "end");
-        }
-        g.append("g").call(d3.axisLeft(yScale));
-
-        const lineGen = d3.line<{ x: Date, y: number }>()
-            .x(d => xScale(d.x))
-            .y(d => yScale(d.y))
+        // Create line generator
+        const lineGen = d3.line<DiffPoint>()
+            .x(d => xScale(d.inputdate))
+            .y(d => yScale(d.diff))
             .curve(d3.curveMonotoneX);
 
-        // Draw forecast confidence bands (dashed grey).
+        // Draw historical line
         g.append("path")
-            .datum(forecastLowerLine)
-            .attr("fill", "none")
-            .attr("stroke", "grey")
-            .attr("stroke-width", 1)
-            .style("stroke-dasharray", "3,3")
-            .attr("d", lineGen);
-        g.append("path")
-            .datum(forecastUpperLine)
-            .attr("fill", "none")
-            .attr("stroke", "grey")
-            .attr("stroke-width", 1)
-            .style("stroke-dasharray", "3,3")
-            .attr("d", lineGen);
-
-        // Draw forecast mean line (solid orange).
-        g.append("path")
-            .datum(forecastMeanLine)
-            .attr("fill", "none")
-            .attr("stroke", "orange")
-            .attr("stroke-width", 2)
-            .style("stroke-dasharray", "0")
-            .attr("d", lineGen);
-
-        // Draw historical data line (solid, color #00818F).
-        g.append("path")
-            .datum(this.diffSeries.map(d => ({ x: d.inputdate, y: d.diff })))
+            .datum(this.diffSeries)
             .attr("fill", "none")
             .attr("stroke", "#00818F")
             .attr("stroke-width", 2)
-            .style("stroke-dasharray", "0")
             .attr("d", lineGen);
 
-        // Add status text
-        g.append("text")
-            .attr("x", innerWidth / 2)
-            .attr("y", 15)
-            .attr("text-anchor", "middle")
-            .style("fill", isStationary ? "green" : "red")
+        if (isStationary) {
+            // Calculate OU parameters
+            const n = this.diffSeries.length - 1;
+            const diffValues = this.diffSeries.map(d => d.diff);
+            const diffMean = d3.mean(diffValues)!;
+            
+            // Calculate alpha
+            let num = 0, den = 0;
+            for (let i = 0; i < n; i++) {
+                num += (diffValues[i + 1] - diffMean) * (diffValues[i] - diffMean);
+                den += Math.pow(diffValues[i] - diffMean, 2);
+            }
+            let alphaHat = num / den;
+            alphaHat = Math.max(Math.min(alphaHat, 0.9999999), -0.9999999);
+
+            // Calculate time parameters
+            const firstTime = this.diffSeries[0].inputdate.getTime();
+            const lastTime = this.diffSeries[this.diffSeries.length - 1].inputdate.getTime();
+            const delta = (lastTime - firstTime) / n;
+            const deltaDays = delta / (1000 * 60 * 60 * 24);
+
+            // Calculate OU parameters
+            this.lambdaHat = -Math.log(alphaHat) / deltaDays;
+            
+            // Calculate mu
+            let sumResidual = 0;
+            for (let i = 0; i < n; i++) {
+                sumResidual += diffValues[i + 1] - alphaHat * diffValues[i];
+            }
+            this.muHat = sumResidual / (n * (1 - alphaHat));
+
+            // Calculate sigma
+            let sumSq = 0;
+            for (let i = 0; i < n; i++) {
+                const r = diffValues[i + 1] - alphaHat * diffValues[i] - (1 - alphaHat) * this.muHat;
+                sumSq += r * r;
+            }
+            const sigmaSqHat = (2 * this.lambdaHat) / (1 - alphaHat * alphaHat) * (1 / n) * sumSq;
+            this.sigmaHat = Math.sqrt(Math.max(sigmaSqHat, 0));
+
+            // Apply slider scaling
+            const lambdaFactor = parseFloat(this.lambdaSlider.value);
+            const sigmaFactor = parseFloat(this.sigmaSlider.value);
+            const newLambda = this.lambdaHat * lambdaFactor;
+            const newSigma = this.sigmaHat * sigmaFactor;
+            const alpha = Math.exp(-newLambda * deltaDays);
+
+            // Generate forecast points
+            const lastDiff = this.diffSeries[this.diffSeries.length - 1].diff;
+            const forecastSteps = 30;
+            let forecastPoints: DiffPoint[] = [];
+            let upperBoundPoints: DiffPoint[] = [];
+            let lowerBoundPoints: DiffPoint[] = [];
+
+            // Start forecast from the last historical point
+            for (let i = 0; i <= forecastSteps; i++) {
+                const nextDate = new Date(lastTime + i * delta);
+                const meanForecast = this.muHat + (lastDiff - this.muHat) * Math.pow(alpha, i);
+                const varForecast = (newSigma * newSigma) / (2 * newLambda) * (1 - Math.pow(alpha, 2 * i));
+                const stdDev = Math.sqrt(varForecast);
+                
+                forecastPoints.push({ inputdate: nextDate, diff: meanForecast });
+                upperBoundPoints.push({ inputdate: nextDate, diff: meanForecast + 1.96 * stdDev });
+                lowerBoundPoints.push({ inputdate: nextDate, diff: meanForecast - 1.96 * stdDev });
+            }
+
+            // Update x-scale domain to include forecast
+            xScale.domain([
+                d3.min(this.diffSeries, d => d.inputdate)!,
+                d3.max(forecastPoints, d => d.inputdate)!
+            ]);
+
+            // Draw confidence interval
+            g.append("path")
+                .datum(upperBoundPoints)
+                .attr("fill", "none")
+                .attr("stroke", "grey")
+                .attr("stroke-width", 1)
+                .style("stroke-dasharray", "3,3")
+                .attr("d", lineGen);
+
+            g.append("path")
+                .datum(lowerBoundPoints)
+                .attr("fill", "none")
+                .attr("stroke", "grey")
+                .attr("stroke-width", 1)
+                .style("stroke-dasharray", "3,3")
+                .attr("d", lineGen);
+
+            // Draw forecast line
+            g.append("path")
+                .datum(forecastPoints)
+                .attr("fill", "none")
+                .attr("stroke", "orange")
+                .attr("stroke-width", 2)
+                .attr("d", lineGen);
+
+            // Add status text
+            g.append("text")
+                .attr("x", innerWidth / 2)
+                .attr("y", 15)
+                .attr("text-anchor", "middle")
+                .style("fill", "green")
+                .style("font-size", "12px")
+                .text("ADF passed: Series stationary. OU applied.");
+        } else {
+            // Add status text
+            g.append("text")
+                .attr("x", innerWidth / 2)
+                .attr("y", 15)
+                .attr("text-anchor", "middle")
+                .style("fill", "red")
+                .style("font-size", "12px")
+                .style("font-family", "sans-serif")
+                .style("font-weight", "bold")
+                .text("ADF failed: Series non-stationary. OU not applied.");
+        }
+
+        // Add axes after all data is drawn
+        const xAxis = d3.axisBottom(xScale)
+            .tickFormat(d3.timeFormat("%Y-%m-%d"))
+            .ticks(Math.max(3, Math.floor(innerWidth / 150)));
+
+        const yAxis = d3.axisLeft(yScale);
+
+        // Add x-axis
+        const xAxisGroup = g.append("g")
+            .attr("transform", `translate(0, ${innerHeight})`)
+            .call(xAxis);
+
+        // Style x-axis
+        xAxisGroup.selectAll("line")
+            .style("stroke", "#ccc")
+            .style("stroke-width", 1);
+
+        xAxisGroup.selectAll("path")
+            .style("stroke", "#666")
+            .style("stroke-width", 1);
+
+        // Style and rotate x-axis labels
+        xAxisGroup.selectAll("text")
+            .attr("transform", "rotate(-45)")
+            .style("text-anchor", "end")
             .style("font-size", "12px")
-            .text(isStationary ? 
-                "ADF passed: Series stationary. OU applied." : 
-                "ADF failed: Series non-stationary. OU not applied.");
+            .style("fill", "#666")
+            .style("font-family", "sans-serif")
+            .style("font-weight", "normal")
+            .attr("dy", "0.71em")
+            .attr("dx", "-0.71em")
+            .style("white-space", "nowrap");
+
+        // Add y-axis
+        const yAxisGroup = g.append("g")
+            .call(yAxis);
+
+        yAxisGroup.selectAll("line")
+            .style("stroke", "#ccc")
+            .style("stroke-width", 1);
+
+        yAxisGroup.selectAll("path")
+            .style("stroke", "#666")
+            .style("stroke-width", 1);
+
+        yAxisGroup.selectAll("text")
+            .style("font-size", "11px")
+            .style("fill", "#666")
+            .style("font-family", "sans-serif");
     }
 }
