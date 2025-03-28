@@ -280,7 +280,7 @@ export class Visual implements IVisual {
         this.svg
             .attr("width", width)
             .attr("height", height)
-            .style("background", "#1a1a1a");  // Dark background
+            .style("background", "white");
 
         // Calculate inner dimensions
         const innerWidth = width - CHART_MARGINS.left - CHART_MARGINS.right;
@@ -296,7 +296,7 @@ export class Visual implements IVisual {
                 .attr("x", innerWidth / 2)
                 .attr("y", innerHeight / 2)
                 .attr("text-anchor", "middle")
-                .attr("fill", "white")  // Changed to white
+                .attr("fill", "black")
                 .style("font-size", "14px")
                 .text("No data to display.");
             return;
@@ -314,7 +314,7 @@ export class Visual implements IVisual {
         // Add grid lines
         const gridLines = g.append("g")
             .attr("class", "grid-lines")
-            .style("stroke", "rgba(255, 255, 255, 0.1)")  // Lighter grid lines
+            .style("stroke", "rgba(0, 0, 0, 0.1)")
             .style("stroke-dasharray", "2,2");
 
         // Add vertical grid lines
@@ -340,23 +340,26 @@ export class Visual implements IVisual {
         // Add Clayton copula bounds
         const boundsGroup = g.append("g")
             .attr("class", "copula-bounds")
-            .style("stroke", "white")
-            .style("stroke-width", "2px")
+            .style("stroke", "black")
+            .style("stroke-width", "1px")
             .style("fill", "none");
 
-        // Generate points for the upper bound curve
+        // Generate points for the bounds curves
         const upperBoundPoints: [number, number][] = [];
         const lowerBoundPoints: [number, number][] = [];
         const numPoints = 100;
         
+        // Get Clayton parameter
+        const theta = Math.abs(this.copulaModel.getCorrelation() * 20);
+        
         for (let i = 0; i <= numPoints; i++) {
             const x = i / numPoints;
             
-            // Clayton upper bound (minimum of u1 and u2)
-            upperBoundPoints.push([x, Math.min(1, x)]);
+            // Upper bound curve (perfect positive dependence)
+            upperBoundPoints.push([x, Math.min(1, Math.pow(Math.pow(x, -theta) + Math.pow(1, -theta) - 1, -1/theta))]);
             
-            // Clayton lower bound (max(0, u1 + u2 - 1))
-            lowerBoundPoints.push([x, Math.max(0, x + 0.1 - 1)]);
+            // Lower bound curve (perfect negative dependence)
+            lowerBoundPoints.push([x, Math.max(0, Math.pow(Math.pow(x, -theta) + Math.pow(0, -theta) - 1, -1/theta))]);
         }
 
         // Create line generator
@@ -368,18 +371,18 @@ export class Visual implements IVisual {
         boundsGroup.append("path")
             .datum(upperBoundPoints)
             .attr("d", lineGenerator)
-            .style("stroke", "white")
-            .style("stroke-width", "1.5px");
+            .style("stroke", "black")
+            .style("stroke-width", "1px");
 
         // Add lower bound curve
         boundsGroup.append("path")
             .datum(lowerBoundPoints)
             .attr("d", lineGenerator)
-            .style("stroke", "white")
-            .style("stroke-width", "1.5px");
+            .style("stroke", "black")
+            .style("stroke-width", "1px");
 
-        // Plot scatter points with dynamic size
-        const pointSize = Math.max(2, Math.min(width, height) / 300);
+        // Plot scatter points
+        const pointSize = 2;
         g.selectAll("circle")
             .data(this.copulaModel.getPoints())
             .enter()
@@ -387,7 +390,7 @@ export class Visual implements IVisual {
             .attr("cx", d => xScale(d.u1))
             .attr("cy", d => yScale(d.u2))
             .attr("r", pointSize)
-            .attr("fill", "#00818F")
+            .attr("fill", "black")
             .attr("opacity", 0.6);
 
         // Create axes with dynamic tick count
@@ -409,14 +412,14 @@ export class Visual implements IVisual {
         xAxisGroup.selectAll("text")
             .style("text-anchor", "middle")
             .style("font-size", "10px")
-            .style("fill", "white");
+            .style("fill", "black");
 
         xAxisGroup.selectAll("line")
-            .style("stroke", "white")
+            .style("stroke", "black")
             .style("stroke-width", "1px");
 
         xAxisGroup.selectAll("path")
-            .style("stroke", "white")
+            .style("stroke", "black")
             .style("stroke-width", "1px");
 
         // Add y-axis
@@ -425,36 +428,34 @@ export class Visual implements IVisual {
 
         yAxisGroup.selectAll("text")
             .style("font-size", "10px")
-            .style("fill", "white");
+            .style("fill", "black");
 
         yAxisGroup.selectAll("line")
-            .style("stroke", "white")
+            .style("stroke", "black")
             .style("stroke-width", "1px");
 
         yAxisGroup.selectAll("path")
-            .style("stroke", "white")
+            .style("stroke", "black")
             .style("stroke-width", "1px");
 
-        // Add axis labels with dynamic font size
+        // Add axis labels
         const labelFontSize = Math.max(10, Math.min(width, height) / 50);
         
-        // Add x-axis label with more space from axis
         g.append("text")
             .attr("x", innerWidth / 2)
             .attr("y", innerHeight + 50)
             .attr("text-anchor", "middle")
             .style("font-size", `${labelFontSize}px`)
-            .style("fill", "white")
+            .style("fill", "black")
             .text("Bond1 Error (U1)");
 
-        // Add y-axis label with more space from axis
         g.append("text")
             .attr("transform", "rotate(-90)")
             .attr("x", -innerHeight / 2)
             .attr("y", -45)
             .attr("text-anchor", "middle")
             .style("font-size", `${labelFontSize}px`)
-            .style("fill", "white")
+            .style("fill", "black")
             .text("Bond2 Error (U2)");
 
         // Add correlation info
@@ -463,7 +464,7 @@ export class Visual implements IVisual {
             .attr("y", -20)
             .attr("text-anchor", "end")
             .style("font-size", `${labelFontSize}px`)
-            .style("fill", "white")
+            .style("fill", "black")
             .text(`ρ = ${this.copulaModel.getCorrelation().toFixed(3)}`);
     }
 }
