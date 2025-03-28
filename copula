@@ -14,7 +14,7 @@ import VisualUpdateOptions = powerbiVisualsApi.extensibility.visual.VisualUpdate
 import DataView = powerbiVisualsApi.DataView;
 
 // Constants
-const CHART_MARGINS = { top: 20, right: 20, bottom: 40, left: 40 };
+const CHART_MARGINS = { top: 40, right: 30, bottom: 120, left: 60 };
 
 /**
  * Interface representing a single row of input data
@@ -397,17 +397,19 @@ export class Visual implements IVisual {
         // Add axis labels with dynamic font size
         const labelFontSize = Math.max(10, Math.min(width, height) / 50);
         
+        // Add x-axis label with more space from axis
         g.append("text")
             .attr("x", innerWidth / 2)
-            .attr("y", innerHeight + CHART_MARGINS.bottom * 0.8)
+            .attr("y", innerHeight + 50)  // Increased distance from axis
             .attr("text-anchor", "middle")
             .style("font-size", `${labelFontSize}px`)
             .text("Bond1 Error (U1)");
 
+        // Add y-axis label with more space from axis
         g.append("text")
             .attr("transform", "rotate(-90)")
             .attr("x", -innerHeight / 2)
-            .attr("y", -CHART_MARGINS.left * 0.8)
+            .attr("y", -45)  // Increased distance from axis
             .attr("text-anchor", "middle")
             .style("font-size", `${labelFontSize}px`)
             .text("Bond2 Error (U2)");
@@ -415,7 +417,7 @@ export class Visual implements IVisual {
         // Add correlation info
         g.append("text")
             .attr("x", innerWidth - 10)
-            .attr("y", -10)
+            .attr("y", -20)  // Adjusted position
             .attr("text-anchor", "end")
             .style("font-size", `${labelFontSize}px`)
             .text(`ρ = ${this.copulaModel.getCorrelation().toFixed(3)}`);
