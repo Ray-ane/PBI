@@ -64,6 +64,7 @@ export class Visual implements IVisual {
     // Data Storage
     private allData: DataRow[] = [];
     private diffSeries: DiffPoint[] = [];
+    private adfTestCache: Map<string, boolean> = new Map();
 
     // Ornstein-Uhlenbeck Parameters
     private lambdaHat: number = 0;
@@ -232,9 +233,52 @@ export class Visual implements IVisual {
         }
     }
 
-    /**
-     * Updates the dropdown with the latest P_VALUE rows
-     */
+    private computeDiffSeries(bond1: string, bond2: string): DiffPoint[] {
+        const errorRows = this.allData.filter(d => 
+            d.context1.trim().toUpperCase() === "ERROR"
+        );
+
+        const mapBond1 = new Map<string, number>();
+        const mapBond2 = new Map<string, number>();
+        
+        errorRows.forEach(d => {
+            const key = d.inputdate.toDateString();
+            if (d.bond1.trim() === bond1.trim()) {
+                mapBond1.set(key, d.error);
+            } else if (d.bond1.trim() === bond2.trim()) {
+                mapBond2.set(key, d.error);
+            }
+        });
+
+        return Array.from(mapBond1.entries())
+            .filter(([key]) => mapBond2.has(key))
+            .map(([key, val1]) => ({
+                inputdate: new Date(key),
+                diff: mapBond2.get(key)! - val1
+            }))
+            .sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
+    }
+
+    private checkADFTest(pair: string): boolean {
+        // Check cache first
+        if (this.adfTestCache.has(pair)) {
+            return this.adfTestCache.get(pair)!;
+        }
+
+        const [bond1, bond2] = pair.split(" vs ");
+        const diffSeries = this.computeDiffSeries(bond1, bond2);
+
+        if (diffSeries.length < 2) {
+            this.adfTestCache.set(pair, false);
+            return false;
+        }
+
+        const diffs = diffSeries.map(d => d.diff);
+        const result = this.performADFTest(diffs);
+        this.adfTestCache.set(pair, result);
+        return result;
+    }
+
     private updateDropdown(): void {
         const pValueRows = this.allData.filter(d => 
             d.context1.trim().toUpperCase() === "P_VALUE"
@@ -259,68 +303,23 @@ export class Visual implements IVisual {
         // Check if we should filter for ADF-passing pairs
         const showOnlyADFPairs = (document.getElementById("showOnlyADFPairs") as HTMLInputElement).checked;
         
-        if (showOnlyADFPairs) {
-            // Filter pairs that pass ADF test
-            const adfPassingPairs = uniquePairs.filter(pair => {
-                const [bond1, bond2] = pair.split(" vs ");
-                const errorRows = this.allData.filter(d => 
-                    d.context1.trim().toUpperCase() === "ERROR"
-                );
+        // Filter pairs based on ADF test if needed
+        const filteredPairs = showOnlyADFPairs 
+            ? uniquePairs.filter(pair => this.checkADFTest(pair))
+            : uniquePairs;
 
-                const mapBond1 = new Map<string, number>();
-                const mapBond2 = new Map<string, number>();
-                
-                errorRows.forEach(d => {
-                    const key = d.inputdate.toDateString();
-                    if (d.bond1.trim() === bond1.trim()) {
-                        mapBond1.set(key, d.error);
-                    } else if (d.bond1.trim() === bond2.trim()) {
-                        mapBond2.set(key, d.error);
-                    }
-                });
+        // Update dropdown
+        this.dropdownPairs.options.length = 0;
+        filteredPairs.forEach(pair => {
+            const opt = document.createElement("option");
+            opt.value = pair;
+            opt.text = pair;
+            opt.style.fontSize = "10px";
+            this.dropdownPairs.appendChild(opt);
+        });
 
-                // Compute difference series
-                const diffSeries = Array.from(mapBond1.entries())
-                    .filter(([key]) => mapBond2.has(key))
-                    .map(([key, val1]) => ({
-                        inputdate: new Date(key),
-                        diff: mapBond2.get(key)! - val1
-                    }))
-                    .sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
-
-                if (diffSeries.length < 2) return false;
-
-                // Apply ADF test
-                const diffs = diffSeries.map(d => d.diff);
-                return this.performADFTest(diffs);
-            });
-
-            this.dropdownPairs.options.length = 0;
-            adfPassingPairs.forEach(pair => {
-                const opt = document.createElement("option");
-                opt.value = pair;
-                opt.text = pair;
-                opt.style.fontSize = "10px";
-                this.dropdownPairs.appendChild(opt);
-            });
-
-            if (adfPassingPairs.length > 0) {
-                this.dropdownPairs.value = adfPassingPairs[0];
-            }
-        } else {
-            // Show all pairs
-            this.dropdownPairs.options.length = 0;
-            uniquePairs.forEach(pair => {
-                const opt = document.createElement("option");
-                opt.value = pair;
-                opt.text = pair;
-                opt.style.fontSize = "10px";
-                this.dropdownPairs.appendChild(opt);
-            });
-
-            if (uniquePairs.length > 0) {
-                this.dropdownPairs.value = uniquePairs[0];
-            }
+        if (filteredPairs.length > 0) {
+            this.dropdownPairs.value = filteredPairs[0];
         }
     }
 
@@ -331,32 +330,7 @@ export class Visual implements IVisual {
         if (!selectedPair) return;
         
         const [selectedBond1, selectedBond2] = selectedPair.split(" vs ");
-
-        // Filter and compute difference series
-        const errorRows = this.allData.filter(d => 
-            d.context1.trim().toUpperCase() === "ERROR"
-        );
-
-        const mapBond1 = new Map<string, number>();
-        const mapBond2 = new Map<string, number>();
-        
-        errorRows.forEach(d => {
-            const key = d.inputdate.toDateString();
-            if (d.bond1.trim() === selectedBond1.trim()) {
-                mapBond1.set(key, d.error);
-            } else if (d.bond1.trim() === selectedBond2.trim()) {
-                mapBond2.set(key, d.error);
-            }
-        });
-
-        // Compute difference series
-        this.diffSeries = Array.from(mapBond1.entries())
-            .filter(([key]) => mapBond2.has(key))
-            .map(([key, val1]) => ({
-                inputdate: new Date(key),
-                diff: mapBond2.get(key)! - val1
-            }))
-            .sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
+        this.diffSeries = this.computeDiffSeries(selectedBond1, selectedBond2);
 
         if (this.diffSeries.length < 2) {
             this.renderChart(false);
