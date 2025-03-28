@@ -104,15 +104,15 @@ export class Visual implements IVisual {
                 <select id="pairDropdown" style="font-size: 10px;"></select>
             </div>
             <div id="slider-container">
-                <div>
-                    <label for="lambdaSlider">Lambda Factor:</label>
+            <div>
+                <label for="lambdaSlider">Lambda Factor:</label>
                     <input id="lambdaSlider" type="range" min="0.1" max="2.0" step="0.01" value="1.0">
-                    <span id="lambdaValue">1.0</span>
-                </div>
-                <div>
-                    <label for="sigmaSlider">Sigma Factor:</label>
+                <span id="lambdaValue">1.0</span>
+            </div>
+            <div>
+                <label for="sigmaSlider">Sigma Factor:</label>
                     <input id="sigmaSlider" type="range" min="0.1" max="1.5" step="0.01" value="1.0">
-                    <span id="sigmaValue">1.0</span>
+                <span id="sigmaValue">1.0</span>
                 </div>
             </div>
         `;
@@ -480,13 +480,13 @@ export class Visual implements IVisual {
                 .concat(ouResults.lowerBoundPoints.map(d => d.diff));
 
             xScale = d3.scaleTime()
-                .domain([d3.min(allX) as Date, d3.max(allX) as Date])
-                .range([0, innerWidth]);
+            .domain([d3.min(allX) as Date, d3.max(allX) as Date])
+            .range([0, innerWidth]);
 
             yScale = d3.scaleLinear()
-                .domain([d3.min(allY) as number, d3.max(allY) as number])
-                .range([innerHeight, 0])
-                .nice();
+            .domain([d3.min(allY) as number, d3.max(allY) as number])
+            .range([innerHeight, 0])
+            .nice();
         } else {
             xScale = d3.scaleTime()
                 .domain([
@@ -569,15 +569,7 @@ export class Visual implements IVisual {
             .attr("stroke", "orange")
             .attr("stroke-width", 2)
             .style("stroke-dasharray", "0")
-            .attr("d", lineGen)
-            .style("pointer-events", "all")
-            .on("mousemove", (event) => {
-                const mouseX = xScale.invert(d3.pointer(event)[0]);
-                const index = bisectDate(ouResults.forecastPoints, mouseX);
-                const d = ouResults.forecastPoints[index];
-                if (d) showTooltip(event, d);
-            })
-            .on("mouseout", hideTooltip);
+            .attr("d", lineGen);
 
         // Draw historical data line
         g.append("path")
@@ -588,17 +580,65 @@ export class Visual implements IVisual {
             .style("stroke-dasharray", "0")
             .attr("d", lineGen);
 
-        // Add tooltip interaction overlay
-        g.append("rect")
+        // Add tooltip interaction overlay for the entire chart area
+        const overlay = g.append("rect")
             .attr("width", innerWidth)
             .attr("height", innerHeight)
             .style("fill", "none")
             .style("pointer-events", "all")
             .on("mousemove", (event) => {
                 const mouseX = xScale.invert(d3.pointer(event)[0]);
-                const index = bisectDate(this.diffSeries, mouseX);
-                const d = this.diffSeries[index];
-                if (d) showTooltip(event, d);
+                
+                // Find the closest point in historical data
+                const histIndex = bisectDate(this.diffSeries, mouseX);
+                const histPoint = this.diffSeries[histIndex];
+                
+                // Find the closest point in forecast data
+                const forecastIndex = bisectDate(ouResults.forecastPoints, mouseX);
+                const forecastPoint = ouResults.forecastPoints[forecastIndex];
+                
+                // Find the closest points in upper and lower bounds
+                const upperPoint = ouResults.upperBoundPoints[forecastIndex];
+                const lowerPoint = ouResults.lowerBoundPoints[forecastIndex];
+
+                // Determine which point to show based on which is closer to the mouse
+                let tooltipContent = "";
+                
+                if (histPoint && forecastPoint) {
+                    const histDist = Math.abs(histPoint.inputdate.getTime() - mouseX.getTime());
+                    const forecastDist = Math.abs(forecastPoint.inputdate.getTime() - mouseX.getTime());
+                    
+                    if (histDist < forecastDist) {
+                        tooltipContent = `Historical Data:<br/>
+                            Date: ${histPoint.inputdate.toLocaleDateString()}<br/>
+                            Value: ${histPoint.diff.toFixed(4)}`;
+                    } else {
+                        tooltipContent = `Forecast:<br/>
+                            Date: ${forecastPoint.inputdate.toLocaleDateString()}<br/>
+                            Value: ${forecastPoint.diff.toFixed(4)}<br/>
+                            Upper Bound: ${upperPoint.diff.toFixed(4)}<br/>
+                            Lower Bound: ${lowerPoint.diff.toFixed(4)}`;
+                    }
+                } else if (histPoint) {
+                    tooltipContent = `Historical Data:<br/>
+                        Date: ${histPoint.inputdate.toLocaleDateString()}<br/>
+                        Value: ${histPoint.diff.toFixed(4)}`;
+                } else if (forecastPoint) {
+                    tooltipContent = `Forecast:<br/>
+                        Date: ${forecastPoint.inputdate.toLocaleDateString()}<br/>
+                        Value: ${forecastPoint.diff.toFixed(4)}<br/>
+                        Upper Bound: ${upperPoint.diff.toFixed(4)}<br/>
+                        Lower Bound: ${lowerPoint.diff.toFixed(4)}`;
+                }
+
+                if (tooltipContent) {
+                    const tooltip = d3.select("#tooltip");
+                    tooltip
+                        .style("opacity", 1)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 10) + "px")
+                        .html(tooltipContent);
+                }
             })
             .on("mouseout", hideTooltip);
     }
