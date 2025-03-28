@@ -280,7 +280,7 @@ export class Visual implements IVisual {
         this.svg
             .attr("width", width)
             .attr("height", height)
-            .style("background", "white");
+            .style("background", "#1a1a1a");  // Dark background
 
         // Calculate inner dimensions
         const innerWidth = width - CHART_MARGINS.left - CHART_MARGINS.right;
@@ -296,7 +296,7 @@ export class Visual implements IVisual {
                 .attr("x", innerWidth / 2)
                 .attr("y", innerHeight / 2)
                 .attr("text-anchor", "middle")
-                .attr("fill", "red")
+                .attr("fill", "white")  // Changed to white
                 .style("font-size", "14px")
                 .text("No data to display.");
             return;
@@ -314,7 +314,7 @@ export class Visual implements IVisual {
         // Add grid lines
         const gridLines = g.append("g")
             .attr("class", "grid-lines")
-            .style("stroke", "rgba(0, 0, 0, 0.1)")
+            .style("stroke", "rgba(255, 255, 255, 0.1)")  // Lighter grid lines
             .style("stroke-dasharray", "2,2");
 
         // Add vertical grid lines
@@ -336,6 +336,47 @@ export class Visual implements IVisual {
                 .attr("x2", innerWidth)
                 .attr("y2", yScale(y));
         }
+
+        // Add Clayton copula bounds
+        const boundsGroup = g.append("g")
+            .attr("class", "copula-bounds")
+            .style("stroke", "white")
+            .style("stroke-width", "2px")
+            .style("fill", "none");
+
+        // Generate points for the upper bound curve
+        const upperBoundPoints: [number, number][] = [];
+        const lowerBoundPoints: [number, number][] = [];
+        const numPoints = 100;
+        
+        for (let i = 0; i <= numPoints; i++) {
+            const x = i / numPoints;
+            
+            // Clayton upper bound (minimum of u1 and u2)
+            upperBoundPoints.push([x, Math.min(1, x)]);
+            
+            // Clayton lower bound (max(0, u1 + u2 - 1))
+            lowerBoundPoints.push([x, Math.max(0, x + 0.1 - 1)]);
+        }
+
+        // Create line generator
+        const lineGenerator = d3.line()
+            .x(d => xScale(d[0]))
+            .y(d => yScale(d[1]));
+
+        // Add upper bound curve
+        boundsGroup.append("path")
+            .datum(upperBoundPoints)
+            .attr("d", lineGenerator)
+            .style("stroke", "white")
+            .style("stroke-width", "1.5px");
+
+        // Add lower bound curve
+        boundsGroup.append("path")
+            .datum(lowerBoundPoints)
+            .attr("d", lineGenerator)
+            .style("stroke", "white")
+            .style("stroke-width", "1.5px");
 
         // Plot scatter points with dynamic size
         const pointSize = Math.max(2, Math.min(width, height) / 300);
@@ -368,14 +409,14 @@ export class Visual implements IVisual {
         xAxisGroup.selectAll("text")
             .style("text-anchor", "middle")
             .style("font-size", "10px")
-            .style("fill", "#000");
+            .style("fill", "white");
 
         xAxisGroup.selectAll("line")
-            .style("stroke", "#000")
+            .style("stroke", "white")
             .style("stroke-width", "1px");
 
         xAxisGroup.selectAll("path")
-            .style("stroke", "#000")
+            .style("stroke", "white")
             .style("stroke-width", "1px");
 
         // Add y-axis
@@ -384,14 +425,14 @@ export class Visual implements IVisual {
 
         yAxisGroup.selectAll("text")
             .style("font-size", "10px")
-            .style("fill", "#000");
+            .style("fill", "white");
 
         yAxisGroup.selectAll("line")
-            .style("stroke", "#000")
+            .style("stroke", "white")
             .style("stroke-width", "1px");
 
         yAxisGroup.selectAll("path")
-            .style("stroke", "#000")
+            .style("stroke", "white")
             .style("stroke-width", "1px");
 
         // Add axis labels with dynamic font size
@@ -400,26 +441,29 @@ export class Visual implements IVisual {
         // Add x-axis label with more space from axis
         g.append("text")
             .attr("x", innerWidth / 2)
-            .attr("y", innerHeight + 50)  // Increased distance from axis
+            .attr("y", innerHeight + 50)
             .attr("text-anchor", "middle")
             .style("font-size", `${labelFontSize}px`)
+            .style("fill", "white")
             .text("Bond1 Error (U1)");
 
         // Add y-axis label with more space from axis
         g.append("text")
             .attr("transform", "rotate(-90)")
             .attr("x", -innerHeight / 2)
-            .attr("y", -45)  // Increased distance from axis
+            .attr("y", -45)
             .attr("text-anchor", "middle")
             .style("font-size", `${labelFontSize}px`)
+            .style("fill", "white")
             .text("Bond2 Error (U2)");
 
         // Add correlation info
         g.append("text")
             .attr("x", innerWidth - 10)
-            .attr("y", -20)  // Adjusted position
+            .attr("y", -20)
             .attr("text-anchor", "end")
             .style("font-size", `${labelFontSize}px`)
+            .style("fill", "white")
             .text(`ρ = ${this.copulaModel.getCorrelation().toFixed(3)}`);
     }
 }
