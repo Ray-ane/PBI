@@ -17,6 +17,19 @@ import DataView = powerbiVisualsApi.DataView;
 const CHART_MARGINS = { top: 40, right: 30, bottom: 60, left: 60 };
 
 /**
+ * Interface representing a single row of input data
+ */
+interface DataRow {
+    inputdate: Date;
+    context1: string;
+    isin1: string;
+    isin2: string;
+    bond1: string;
+    bond2: string;
+    error: number;
+}
+
+/**
  * Interface for bond error data points
  */
 interface BondErrorPoint {
@@ -46,7 +59,7 @@ export class Visual implements IVisual {
     private dfSlider: HTMLInputElement;
 
     // Data Storage
-    private allData: BondErrorPoint[] = [];
+    private allData: DataRow[] = [];
     private copulaModel: CopulaModel;
 
     // Viewport Configuration
@@ -117,7 +130,7 @@ export class Visual implements IVisual {
     /**
      * Parses a single row of data with validation
      */
-    private parseDataRow(row: any[]): BondErrorPoint | null {
+    private parseDataRow(row: any[]): DataRow | null {
         let dateVal: Date;
         if (row[0] instanceof Date) {
             dateVal = row[0];
@@ -131,9 +144,13 @@ export class Visual implements IVisual {
         }
 
         return {
-            date: dateVal,
-            bond1Error: +row[1],
-            bond2Error: +row[2]
+            inputdate: dateVal,
+            context1: row[1]?.toString() || "",
+            isin1: row[2]?.toString() || "",
+            isin2: row[3]?.toString() || "",
+            bond1: row[4]?.toString() || "",
+            bond2: row[5]?.toString() || "",
+            error: +row[6]
         };
     }
 
@@ -149,10 +166,10 @@ export class Visual implements IVisual {
         // Parse and sort data
         this.allData = rows
             .map(row => this.parseDataRow(row))
-            .filter((row): row is BondErrorPoint => row !== null)
-            .sort((a, b) => a.date.getTime() - b.date.getTime());
+            .filter((row): row is DataRow => row !== null)
+            .sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
 
-        // Update dropdown with unique bond pairs
+        // Update dropdown with latest P_VALUE rows
         this.updateDropdown();
         
         // Update chart if data is available
@@ -162,11 +179,26 @@ export class Visual implements IVisual {
     }
 
     /**
-     * Updates the dropdown with unique bond pairs
+     * Updates the dropdown with the latest P_VALUE rows
      */
     private updateDropdown(): void {
+        const pValueRows = this.allData.filter(d => 
+            d.context1.trim().toUpperCase() === "P_VALUE"
+        );
+
+        if (pValueRows.length === 0) {
+            this.dropdownPairs.options.length = 0;
+            this.svg.selectAll("*").remove();
+            return;
+        }
+
+        const maxDate = d3.max(pValueRows, d => d.inputdate.getTime())!;
+        const latestRows = pValueRows.filter(d => 
+            d.inputdate.toDateString() === new Date(maxDate).toDateString()
+        );
+
         const uniquePairs = Array.from(new Set(
-            this.allData.map(d => `${d.bond1Error} vs ${d.bond2Error}`)
+            latestRows.map(row => `${row.bond1} vs ${row.bond2}`)
         ));
 
         this.dropdownPairs.options.length = 0;
@@ -191,22 +223,43 @@ export class Visual implements IVisual {
         
         const [selectedBond1, selectedBond2] = selectedPair.split(" vs ");
 
-        // Filter data for selected bond pair
-        const filteredData = this.allData.filter(d => 
-            d.bond1Error.toString() === selectedBond1 && 
-            d.bond2Error.toString() === selectedBond2
+        // Filter and compute error series
+        const errorRows = this.allData.filter(d => 
+            d.context1.trim().toUpperCase() === "ERROR"
         );
 
-        if (filteredData.length < 2) {
+        const mapBond1 = new Map<string, number>();
+        const mapBond2 = new Map<string, number>();
+        
+        errorRows.forEach(d => {
+            const key = d.inputdate.toDateString();
+            if (d.bond1.trim() === selectedBond1.trim()) {
+                mapBond1.set(key, d.error);
+            } else if (d.bond1.trim() === selectedBond2.trim()) {
+                mapBond2.set(key, d.error);
+            }
+        });
+
+        // Create bond error points
+        const bondErrorPoints = Array.from(mapBond1.entries())
+            .filter(([key]) => mapBond2.has(key))
+            .map(([key, val1]) => ({
+                date: new Date(key),
+                bond1Error: val1,
+                bond2Error: mapBond2.get(key)!
+            }))
+            .sort((a, b) => a.date.getTime() - b.date.getTime());
+
+        if (bondErrorPoints.length < 2) {
             this.renderChart(false);
             return;
         }
 
         // Update copula model
         this.copulaModel.setData(
-            filteredData.map(d => d.bond1Error),
-            filteredData.map(d => d.bond2Error),
-            filteredData.map(d => d.date)
+            bondErrorPoints.map(d => d.bond1Error),
+            bondErrorPoints.map(d => d.bond2Error),
+            bondErrorPoints.map(d => d.date)
         );
 
         // Render chart
