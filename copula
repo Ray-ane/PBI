@@ -323,73 +323,83 @@ export class Visual implements IVisual {
             .domain([0, 1])
             .range([innerHeight, 0]);
 
-        // Create color scale for Clayton copula
-        const colorScale = d3.scaleSequential()
-            .domain([0, 5])  // Adjust domain for Clayton density range
-            .interpolator(d3.interpolateViridis);
+        // Add grid lines
+        const gridLines = g.append("g")
+            .attr("class", "grid-lines")
+            .style("stroke", "rgba(255, 255, 255, 0.2)")
+            .style("stroke-dasharray", "2,2");
 
-        // Create grid points with validation
-        const gridSize = 100;  // Increase grid size for smoother visualization
-        const xPoints = d3.range(gridSize).map(i => {
-            const val = 0.0001 + (0.9998 * i / (gridSize - 1));  // Avoid exact 0 and 1
-            return val;
-        });
-        const yPoints = d3.range(gridSize).map(i => {
-            const val = 0.0001 + (0.9998 * i / (gridSize - 1));  // Avoid exact 0 and 1
-            return val;
-        });
+        // Add vertical grid lines
+        for (let i = 0; i <= 10; i++) {
+            const x = i / 10;
+            gridLines.append("line")
+                .attr("x1", xScale(x))
+                .attr("y1", 0)
+                .attr("x2", xScale(x))
+                .attr("y2", innerHeight);
+        }
 
-        // Compute Clayton copula density for each grid point with validation
-        const densityData = xPoints.map(x => 
-            yPoints.map(y => {
-                try {
-                    // Validate input values
-                    if (x < 0 || x > 1 || y < 0 || y > 1) {
-                        console.error(`Invalid input values: x=${x}, y=${y}`);
-                        return {
-                            x,
-                            y,
-                            density: 0 // Return 0 for invalid points
-                        };
-                    }
-                    
-                    const density = this.copulaModel.computeCopulaDensity(x, y);
-                    return {
-                        x,
-                        y,
-                        density
-                    };
-                } catch (error) {
-                    console.error(`Error computing density at (${x}, ${y}):`, error);
-                    return {
-                        x,
-                        y,
-                        density: 0 // Return 0 for error cases
-                    };
-                }
-            })
-        ).flat();
+        // Add horizontal grid lines
+        for (let i = 0; i <= 10; i++) {
+            const y = i / 10;
+            gridLines.append("line")
+                .attr("x1", 0)
+                .attr("y1", yScale(y))
+                .attr("x2", innerWidth)
+                .attr("y2", yScale(y));
+        }
 
-        // Create heatmap
-        g.selectAll("rect")
-            .data(densityData)
+        // Add boundary lines (white)
+        const boundaryLines = g.append("g")
+            .attr("class", "boundary-lines")
+            .style("stroke", "white")
+            .style("stroke-width", "2");
+
+        // Add vertical boundary lines
+        boundaryLines.append("line")
+            .attr("x1", xScale(0))
+            .attr("y1", 0)
+            .attr("x2", xScale(0))
+            .attr("y2", innerHeight);
+
+        boundaryLines.append("line")
+            .attr("x1", xScale(1))
+            .attr("y1", 0)
+            .attr("x2", xScale(1))
+            .attr("y2", innerHeight);
+
+        // Add horizontal boundary lines
+        boundaryLines.append("line")
+            .attr("x1", 0)
+            .attr("y1", yScale(0))
+            .attr("x2", innerWidth)
+            .attr("y2", yScale(0));
+
+        boundaryLines.append("line")
+            .attr("x1", 0)
+            .attr("y1", yScale(1))
+            .attr("x2", innerWidth)
+            .attr("y2", yScale(1));
+
+        // Plot scatter points
+        g.selectAll("circle")
+            .data(this.copulaModel.getPoints())
             .enter()
-            .append("rect")
-            .attr("x", d => xScale(d.x))
-            .attr("y", d => yScale(d.y))
-            .attr("width", xScale(1 / (gridSize - 1)))
-            .attr("height", yScale(1 / (gridSize - 1)))
-            .attr("fill", d => colorScale(d.density))
-            .attr("opacity", 0.8);
+            .append("circle")
+            .attr("cx", d => xScale(d.u1))
+            .attr("cy", d => yScale(d.u2))
+            .attr("r", 3)
+            .attr("fill", "#00A6FF")
+            .attr("opacity", 0.7);
 
         // Add axes
         const xAxis = d3.axisBottom(xScale)
             .ticks(5)
-            .tickFormat(d3.format(".2f"));
+            .tickFormat(d3.format(".1f"));
 
         const yAxis = d3.axisLeft(yScale)
             .ticks(5)
-            .tickFormat(d3.format(".2f"));
+            .tickFormat(d3.format(".1f"));
 
         // Add x-axis
         const xAxisGroup = g.append("g")
@@ -447,15 +457,6 @@ export class Visual implements IVisual {
             .style("fill", "#000")
             .text("Bond2 Error (U2)");
 
-        // Add title
-        g.append("text")
-            .attr("x", innerWidth / 2)
-            .attr("y", -10)
-            .attr("text-anchor", "middle")
-            .style("font-size", "16px")
-            .style("font-weight", "bold")
-            .text("Copula Density Plot");
-
         // Add correlation info
         g.append("text")
             .attr("x", innerWidth - 10)
@@ -464,33 +465,6 @@ export class Visual implements IVisual {
             .style("font-size", "12px")
             .style("fill", "#333")
             .text(`Correlation (ρ) = ${this.copulaModel.getCorrelation().toFixed(3)}`);
-
-        // Add tooltip
-        const tooltip = d3.select("#tooltip");
-        const bisectX = d3.bisector<{x: number, y: number, density: number}, number>(d => d.x).left;
-
-        // Add tooltip interaction overlay
-        g.append("rect")
-            .attr("width", innerWidth)
-            .attr("height", innerHeight)
-            .style("fill", "none")
-            .style("pointer-events", "all")
-            .on("mousemove", (event) => {
-                const mouseX = xScale.invert(d3.pointer(event)[0]);
-                const mouseY = yScale.invert(d3.pointer(event)[1]);
-                const index = bisectX(densityData, mouseX);
-                const d = densityData[index];
-                if (d) {
-                    tooltip
-                        .style("opacity", 1)
-                        .style("left", (event.pageX + 10) + "px")
-                        .style("top", (event.pageY - 10) + "px")
-                        .html(`U1: ${d.x.toFixed(3)}<br/>U2: ${d.y.toFixed(3)}<br/>Density: ${d.density.toFixed(3)}`);
-                }
-            })
-            .on("mouseout", () => {
-                tooltip.style("opacity", 0);
-            });
     }
 }
 
@@ -635,5 +609,16 @@ class CopulaModel {
             console.error(`Error in Clayton copula density: u1=${u1}, u2=${u2}`);
             return 0;
         }
+    }
+
+    /**
+     * Gets the transformed points for plotting
+     */
+    public getPoints(): { u1: number; u2: number }[] {
+        // Return the transformed probabilities
+        return this.params.u1.map((u1, i) => ({
+            u1: u1,
+            u2: this.params.u2[i]
+        }));
     }
 } 
