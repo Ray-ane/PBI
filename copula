@@ -1,0 +1,493 @@
+/**
+ * Power BI Custom Visual for Copula Modeling
+ * This visual analyzes the joint distribution of two bond error series
+ * using t-copula modeling to capture their dependence structure.
+ */
+
+"use strict";
+import "./../style/visual.less";
+import * as d3 from "d3";
+import powerbiVisualsApi from "powerbi-visuals-api";
+import IVisual = powerbiVisualsApi.extensibility.visual.IVisual;
+import VisualConstructorOptions = powerbiVisualsApi.extensibility.visual.VisualConstructorOptions;
+import VisualUpdateOptions = powerbiVisualsApi.extensibility.visual.VisualUpdateOptions;
+import DataView = powerbiVisualsApi.DataView;
+
+// Constants
+const CHART_MARGINS = { top: 40, right: 30, bottom: 60, left: 60 };
+
+/**
+ * Interface for bond error data points
+ */
+interface BondErrorPoint {
+    date: Date;
+    bond1Error: number;
+    bond2Error: number;
+}
+
+/**
+ * Interface for copula parameters
+ */
+interface CopulaParams {
+    rho: number;        // Correlation parameter
+    df: number;         // Degrees of freedom for t-copula
+    u1: number[];       // Marginal probabilities for Bond1
+    u2: number[];       // Marginal probabilities for Bond2
+}
+
+/**
+ * Power BI Custom Visual for Copula Modeling
+ */
+export class Visual implements IVisual {
+    // DOM Elements
+    private target: HTMLElement;
+    private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
+    private dropdownPairs: HTMLSelectElement;
+    private dfSlider: HTMLInputElement;
+
+    // Data Storage
+    private allData: BondErrorPoint[] = [];
+    private copulaModel: CopulaModel;
+
+    // Viewport Configuration
+    private currentViewport: { width: number; height: number } = { width: 600, height: 300 };
+
+    constructor(options: VisualConstructorOptions) {
+        this.initializeVisual(options);
+        this.copulaModel = new CopulaModel();
+    }
+
+    /**
+     * Initializes the visual with controls and event listeners
+     */
+    private initializeVisual(options: VisualConstructorOptions): void {
+        this.target = options.element;
+        this.target.innerHTML = "";
+
+        this.createControlContainer();
+        this.initializeControls();
+        this.createSVGContainer();
+    }
+
+    /**
+     * Creates the control container with dropdown and slider
+     */
+    private createControlContainer(): void {
+        const controlContainer = document.createElement("div");
+        controlContainer.id = "control-container";
+        controlContainer.innerHTML = `
+            <div id="dropdown-container">
+                <label for="pairDropdown">Select Pair (Bond1 vs Bond2):</label>
+                <select id="pairDropdown" style="font-size: 10px;"></select>
+            </div>
+            <div id="slider-container">
+                <div>
+                    <label for="dfSlider">Degrees of Freedom:</label>
+                    <input id="dfSlider" type="range" min="1" max="20" step="0.1" value="5">
+                    <span id="dfValue">5.0</span>
+                </div>
+            </div>
+        `;
+        this.target.appendChild(controlContainer);
+    }
+
+    /**
+     * Initializes control elements and event listeners
+     */
+    private initializeControls(): void {
+        this.dropdownPairs = document.getElementById("pairDropdown") as HTMLSelectElement;
+        this.dfSlider = document.getElementById("dfSlider") as HTMLInputElement;
+
+        this.dropdownPairs.addEventListener("change", () => this.updateChartsInner());
+        this.dfSlider.addEventListener("input", () => {
+            (document.getElementById("dfValue") as HTMLElement).innerText = this.dfSlider.value;
+            this.updateChartsInner();
+        });
+    }
+
+    /**
+     * Creates the SVG container for the chart
+     */
+    private createSVGContainer(): void {
+        this.svg = d3.select(this.target)
+            .append("svg")
+            .classed("copula-visual", true);
+    }
+
+    /**
+     * Parses a single row of data with validation
+     */
+    private parseDataRow(row: any[]): BondErrorPoint | null {
+        let dateVal: Date;
+        if (row[0] instanceof Date) {
+            dateVal = row[0];
+        } else if (typeof row[0] === 'string') {
+            dateVal = new Date(row[0]);
+            if (isNaN(dateVal.getTime())) return null;
+        } else if (typeof row[0] === 'number') {
+            dateVal = new Date(row[0]);
+        } else {
+            return null;
+        }
+
+        return {
+            date: dateVal,
+            bond1Error: +row[1],
+            bond2Error: +row[2]
+        };
+    }
+
+    public update(options: VisualUpdateOptions) {
+        const dataView: DataView = options.dataViews?.[0];
+        if (!dataView?.table) return;
+        
+        this.currentViewport = options.viewport || { width: 600, height: 300 };
+
+        const rows = dataView.table.rows;
+        if (!rows?.length) return;
+
+        // Parse and sort data
+        this.allData = rows
+            .map(row => this.parseDataRow(row))
+            .filter((row): row is BondErrorPoint => row !== null)
+            .sort((a, b) => a.date.getTime() - b.date.getTime());
+
+        // Update dropdown with unique bond pairs
+        this.updateDropdown();
+        
+        // Update chart if data is available
+        if (this.allData.length > 0) {
+            this.updateChartsInner();
+        }
+    }
+
+    /**
+     * Updates the dropdown with unique bond pairs
+     */
+    private updateDropdown(): void {
+        const uniquePairs = Array.from(new Set(
+            this.allData.map(d => `${d.bond1Error} vs ${d.bond2Error}`)
+        ));
+
+        this.dropdownPairs.options.length = 0;
+        uniquePairs.forEach(pair => {
+            const opt = document.createElement("option");
+            opt.value = pair;
+            opt.text = pair;
+            opt.style.fontSize = "10px";
+            this.dropdownPairs.appendChild(opt);
+        });
+
+        if (uniquePairs.length > 0) {
+            this.dropdownPairs.value = uniquePairs[0];
+        }
+    }
+
+    private updateChartsInner() {
+        if (this.dropdownPairs.options.length === 0) return;
+        
+        const selectedPair = this.dropdownPairs.value;
+        if (!selectedPair) return;
+        
+        const [selectedBond1, selectedBond2] = selectedPair.split(" vs ");
+
+        // Filter data for selected bond pair
+        const filteredData = this.allData.filter(d => 
+            d.bond1Error.toString() === selectedBond1 && 
+            d.bond2Error.toString() === selectedBond2
+        );
+
+        if (filteredData.length < 2) {
+            this.renderChart(false);
+            return;
+        }
+
+        // Update copula model
+        this.copulaModel.setData(
+            filteredData.map(d => d.bond1Error),
+            filteredData.map(d => d.bond2Error),
+            filteredData.map(d => d.date)
+        );
+
+        // Render chart
+        this.renderChart(true);
+    }
+
+    private renderChart(hasData: boolean) {
+        // Clear previous chart
+        this.svg.selectAll("*").remove();
+
+        // Set up dimensions
+        const width = this.currentViewport.width;
+        const height = this.currentViewport.height;
+        this.svg.attr("width", width).attr("height", height);
+
+        // Check for data
+        if (!hasData) {
+            this.svg.append("text")
+                .attr("x", width / 2)
+                .attr("y", height / 2)
+                .attr("text-anchor", "middle")
+                .attr("fill", "red")
+                .style("font-size", "14px")
+                .text("No data to display.");
+            return;
+        }
+
+        // Render copula plot
+        this.copulaModel.renderCopulaPlot(this.target, width, height);
+    }
+}
+
+/**
+ * Class for copula modeling and visualization
+ */
+class CopulaModel {
+    private data: BondErrorPoint[] = [];
+    private params: CopulaParams;
+    private margin: { top: number; right: number; bottom: number; left: number } = CHART_MARGINS;
+
+    constructor() {
+        this.params = {
+            rho: 0,
+            df: 5,
+            u1: [],
+            u2: []
+        };
+    }
+
+    /**
+     * Sets the bond error data and computes marginal probabilities
+     */
+    public setData(bond1Errors: number[], bond2Errors: number[], dates: Date[]): void {
+        if (bond1Errors.length !== bond2Errors.length) {
+            throw new Error("Bond error arrays must have the same length");
+        }
+
+        // Create data points
+        this.data = dates.map((date, i) => ({
+            date,
+            bond1Error: bond1Errors[i],
+            bond2Error: bond2Errors[i]
+        }));
+
+        // Compute empirical marginal distributions
+        this.computeMarginals();
+    }
+
+    /**
+     * Computes empirical marginal distributions using rank transformation
+     */
+    private computeMarginals(): void {
+        const n = this.data.length;
+        
+        // Sort errors for rank computation
+        const sortedBond1 = [...this.data].sort((a, b) => a.bond1Error - b.bond1Error);
+        const sortedBond2 = [...this.data].sort((a, b) => a.bond2Error - b.bond2Error);
+
+        // Compute ranks and convert to probabilities
+        this.params.u1 = this.data.map(point => {
+            const rank = sortedBond1.findIndex(d => d.bond1Error === point.bond1Error);
+            return (rank + 1) / (n + 1);
+        });
+
+        this.params.u2 = this.data.map(point => {
+            const rank = sortedBond2.findIndex(d => d.bond2Error === point.bond2Error);
+            return (rank + 1) / (n + 1);
+        });
+
+        // Compute correlation parameter
+        this.computeCorrelation();
+    }
+
+    /**
+     * Computes the correlation parameter using Kendall's tau
+     */
+    private computeCorrelation(): void {
+        const n = this.data.length;
+        let concordant = 0;
+        let discordant = 0;
+
+        for (let i = 0; i < n; i++) {
+            for (let j = i + 1; j < n; j++) {
+                const x1 = this.data[i].bond1Error;
+                const x2 = this.data[i].bond2Error;
+                const y1 = this.data[j].bond1Error;
+                const y2 = this.data[j].bond2Error;
+
+                if ((x1 - y1) * (x2 - y2) > 0) {
+                    concordant++;
+                } else if ((x1 - y1) * (x2 - y2) < 0) {
+                    discordant++;
+                }
+            }
+        }
+
+        const tau = (concordant - discordant) / (n * (n - 1) / 2);
+        this.params.rho = Math.sin(tau * Math.PI / 2);
+    }
+
+    /**
+     * Computes the t-copula density at given points
+     */
+    public computeCopulaDensity(u1: number, u2: number): number {
+        const { rho, df } = this.params;
+        
+        // Convert to standard normal quantiles
+        const x1 = this.quantileNormal(u1);
+        const x2 = this.quantileNormal(u2);
+
+        // Compute t-copula density
+        const rho2 = rho * rho;
+        const t1 = this.quantileT(u1, df);
+        const t2 = this.quantileT(u2, df);
+        
+        const num = (1 + (t1 * t1 + t2 * t2 - 2 * rho * t1 * t2) / (df * (1 - rho2)));
+        const den = Math.sqrt(1 - rho2) * 
+                   this.tDensity(t1, df) * 
+                   this.tDensity(t2, df);
+
+        return num / den;
+    }
+
+    /**
+     * Computes the standard normal quantile
+     */
+    private quantileNormal(p: number): number {
+        return d3.randomNormal.inverse(p);
+    }
+
+    /**
+     * Computes the t-distribution quantile
+     */
+    private quantileT(p: number, df: number): number {
+        return d3.randomT(df).inverse(p);
+    }
+
+    /**
+     * Computes the t-distribution density
+     */
+    private tDensity(x: number, df: number): number {
+        return Math.pow(1 + x * x / df, -(df + 1) / 2) / 
+               (Math.sqrt(df * Math.PI) * this.gamma(df / 2) / this.gamma((df + 1) / 2));
+    }
+
+    /**
+     * Computes the gamma function
+     */
+    private gamma(x: number): number {
+        if (x < 0.5) {
+            return Math.PI / (Math.sin(Math.PI * x) * this.gamma(1 - x));
+        }
+        x -= 1;
+        let a = 0.99999999999980993;
+        const p = [
+            676.5203681218851, -1259.1392167224028, 771.32342877765313,
+            -176.61502916214059, 12.507343278686905, -0.13857109526572012,
+            9.9843695780195716e-6, 1.5056327351493116e-7
+        ];
+        for (let i = 0; i < p.length; i++) {
+            a += p[i] / (x + i + 1);
+        }
+        return Math.sqrt(2 * Math.PI) * Math.pow(x + p.length - 0.5, x + 0.5) * Math.exp(-x - p.length + 0.5) * a;
+    }
+
+    /**
+     * Renders the copula density plot
+     */
+    public renderCopulaPlot(container: HTMLElement, width: number, height: number): void {
+        // Clear previous content
+        container.innerHTML = "";
+
+        // Create SVG
+        const svg = d3.select(container)
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        // Create scales
+        const xScale = d3.scaleLinear()
+            .domain([0, 1])
+            .range([this.margin.left, width - this.margin.right]);
+
+        const yScale = d3.scaleLinear()
+            .domain([0, 1])
+            .range([height - this.margin.bottom, this.margin.top]);
+
+        // Create color scale
+        const colorScale = d3.scaleSequential()
+            .domain([0, 2])
+            .interpolator(d3.interpolateViridis);
+
+        // Create grid points
+        const gridSize = 50;
+        const xPoints = d3.range(gridSize).map(i => i / (gridSize - 1));
+        const yPoints = d3.range(gridSize).map(i => i / (gridSize - 1));
+
+        // Compute copula density for each grid point
+        const densityData = xPoints.map(x => 
+            yPoints.map(y => ({
+                x,
+                y,
+                density: this.computeCopulaDensity(x, y)
+            }))
+        ).flat();
+
+        // Create heatmap
+        svg.selectAll("rect")
+            .data(densityData)
+            .enter()
+            .append("rect")
+            .attr("x", d => xScale(d.x))
+            .attr("y", d => yScale(d.y))
+            .attr("width", xScale(1 / (gridSize - 1)))
+            .attr("height", yScale(1 / (gridSize - 1)))
+            .attr("fill", d => colorScale(d.density))
+            .attr("opacity", 0.8);
+
+        // Add axes
+        const xAxis = d3.axisBottom(xScale)
+            .ticks(5)
+            .tickFormat(d3.format(".2f"));
+
+        const yAxis = d3.axisLeft(yScale)
+            .ticks(5)
+            .tickFormat(d3.format(".2f"));
+
+        svg.append("g")
+            .attr("transform", `translate(0,${height - this.margin.bottom})`)
+            .call(xAxis)
+            .append("text")
+            .attr("x", width / 2)
+            .attr("y", 40)
+            .attr("fill", "black")
+            .text("Bond1 Error (U1)");
+
+        svg.append("g")
+            .attr("transform", `translate(${this.margin.left},0)`)
+            .call(yAxis)
+            .append("text")
+            .attr("transform", "rotate(-90)")
+            .attr("x", -height / 2)
+            .attr("y", -40)
+            .attr("fill", "black")
+            .text("Bond2 Error (U2)");
+
+        // Add title
+        svg.append("text")
+            .attr("x", width / 2)
+            .attr("y", this.margin.top / 2)
+            .attr("text-anchor", "middle")
+            .attr("font-size", "16px")
+            .attr("font-weight", "bold")
+            .text("Copula Density Plot");
+
+        // Add correlation info
+        svg.append("text")
+            .attr("x", width / 2)
+            .attr("y", height - 10)
+            .attr("text-anchor", "middle")
+            .attr("font-size", "12px")
+            .text(`Correlation (ρ) = ${this.params.rho.toFixed(3)}`);
+    }
+} 
