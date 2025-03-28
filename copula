@@ -414,10 +414,38 @@ class CopulaModel {
     }
 
     /**
-     * Computes the t-distribution quantile
+     * Computes the t-distribution quantile (inverse CDF)
+     * Using the approximation method by Hill (1970)
      */
     private quantileT(p: number, df: number): number {
-        return d3.randomT(df).inverse(p);
+        // Input validation
+        if (p <= 0 || p >= 1) {
+            throw new Error("Probability must be between 0 and 1");
+        }
+
+        // For large degrees of freedom, use normal approximation
+        if (df > 100) {
+            return this.quantileNormal(p);
+        }
+
+        // For small degrees of freedom, use Hill's approximation
+        const a = df - 0.5;
+        const b = 48 * a * a;
+        let z = this.quantileNormal(p);
+        let z2 = z * z;
+        let z3 = z2 * z;
+        let z4 = z3 * z;
+        let z5 = z4 * z;
+        let z6 = z5 * z;
+        let z7 = z6 * z;
+        let z8 = z7 * z;
+
+        let g = z + (z3 + z) / (4 * a) +
+            (5 * z5 + 16 * z3 + 3 * z) / (96 * a * a) +
+            (3 * z7 + 19 * z5 + 17 * z3 - 15 * z) / (384 * a * a * a) +
+            (79 * z8 + 776 * z6 + 1482 * z4 - 1920 * z2 - 945) / (92160 * a * a * a * a);
+
+        return g;
     }
 
     /**
