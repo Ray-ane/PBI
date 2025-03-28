@@ -328,18 +328,52 @@ export class Visual implements IVisual {
             .domain([0, 2])
             .interpolator(d3.interpolateViridis);
 
-        // Create grid points
+        // Create grid points with validation
         const gridSize = 50;
-        const xPoints = d3.range(gridSize).map(i => i / (gridSize - 1));
-        const yPoints = d3.range(gridSize).map(i => i / (gridSize - 1));
+        const xPoints = d3.range(gridSize).map(i => {
+            const val = i / (gridSize - 1);
+            if (val < 0 || val > 1) {
+                console.error(`Invalid x grid point: ${val}`);
+            }
+            return val;
+        });
+        const yPoints = d3.range(gridSize).map(i => {
+            const val = i / (gridSize - 1);
+            if (val < 0 || val > 1) {
+                console.error(`Invalid y grid point: ${val}`);
+            }
+            return val;
+        });
 
-        // Compute copula density for each grid point
+        // Compute copula density for each grid point with validation
         const densityData = xPoints.map(x => 
-            yPoints.map(y => ({
-                x,
-                y,
-                density: this.copulaModel.computeCopulaDensity(x, y)
-            }))
+            yPoints.map(y => {
+                try {
+                    // Validate input values
+                    if (x < 0 || x > 1 || y < 0 || y > 1) {
+                        console.error(`Invalid input values: x=${x}, y=${y}`);
+                        return {
+                            x,
+                            y,
+                            density: 0 // Return 0 for invalid points
+                        };
+                    }
+                    
+                    const density = this.copulaModel.computeCopulaDensity(x, y);
+                    return {
+                        x,
+                        y,
+                        density
+                    };
+                } catch (error) {
+                    console.error(`Error computing density at (${x}, ${y}):`, error);
+                    return {
+                        x,
+                        y,
+                        density: 0 // Return 0 for error cases
+                    };
+                }
+            })
         ).flat();
 
         // Create heatmap
@@ -529,12 +563,20 @@ class CopulaModel {
         // Compute ranks and convert to probabilities
         this.params.u1 = this.data.map(point => {
             const rank = sortedBond1.findIndex(d => d.bond1Error === point.bond1Error);
-            return (rank + 1) / (n + 1);
+            const prob = (rank + 1) / (n + 1);
+            if (prob < 0 || prob > 1) {
+                console.error(`Invalid probability computed for Bond1: ${prob}`);
+            }
+            return prob;
         });
 
         this.params.u2 = this.data.map(point => {
             const rank = sortedBond2.findIndex(d => d.bond2Error === point.bond2Error);
-            return (rank + 1) / (n + 1);
+            const prob = (rank + 1) / (n + 1);
+            if (prob < 0 || prob > 1) {
+                console.error(`Invalid probability computed for Bond2: ${prob}`);
+            }
+            return prob;
         });
 
         // Compute correlation parameter
@@ -575,6 +617,12 @@ class CopulaModel {
         const { rho, df } = this.params;
         
         try {
+            // Validate input values
+            if (u1 < 0 || u1 > 1 || u2 < 0 || u2 > 1) {
+                console.error(`Invalid input probabilities: u1=${u1}, u2=${u2}`);
+                return 0;
+            }
+
             // Convert to standard normal quantiles
             const x1 = this.quantileNormal(u1);
             const x2 = this.quantileNormal(u2);
@@ -589,11 +637,19 @@ class CopulaModel {
                        this.tDensity(t1, df) * 
                        this.tDensity(t2, df);
 
-            return num / den;
+            const density = num / den;
+            
+            // Validate output
+            if (!isFinite(density)) {
+                console.error(`Invalid density result: ${density} for u1=${u1}, u2=${u2}`);
+                return 0;
+            }
+
+            return density;
         } catch (error) {
             console.error(`Error in computeCopulaDensity: u1=${u1}, u2=${u2}, df=${df}`);
             console.error(error);
-            throw error;
+            return 0; // Return 0 instead of throwing
         }
     }
 
