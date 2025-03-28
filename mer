@@ -1,12 +1,19 @@
-/* Styling for the control container (dropdown and sliders) */
+/**
+ * Power BI Custom Visual Styling
+ * This file contains the styles for the control container, dropdown, and sliders
+ * used in the Ornstein-Uhlenbeck Process Estimation visual.
+ */
+
+/* Main container for all controls (dropdown and sliders) */
 #control-container {
     display: flex;
     flex-direction: column;
     align-items: center;
     margin-bottom: 10px;
-  }
-  
-  #dropdown-container {
+}
+
+/* Container for the bond pair selection dropdown */
+#dropdown-container {
     display: flex;
     justify-content: center;
     align-items: center;
@@ -14,19 +21,21 @@
     position: relative;
     width: 100%;
     max-width: 400px;
-    flex-wrap: nowrap;
-  }
-  
-  #dropdown-container label {
+    flex-wrap: nowrap; /* Prevents wrapping of label and dropdown */
+}
+
+/* Label styling for the dropdown */
+#dropdown-container label {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     font-size: 12px;
     margin: 0 10px;
     color: #333;
     font-weight: 500;
-    white-space: nowrap;
-  }
-  
-  #dropdown-container select {
+    white-space: nowrap; /* Prevents label text from wrapping */
+}
+
+/* Custom styling for the dropdown select element */
+#dropdown-container select {
     font-size: 12px;
     padding: 8px 12px;
     margin: 0 5px;
@@ -36,62 +45,71 @@
     color: #333;
     cursor: pointer;
     transition: all 0.3s ease;
-    appearance: none;
+    appearance: none; /* Removes default browser styling */
     -webkit-appearance: none;
     -moz-appearance: none;
+    /* Custom dropdown arrow using SVG */
     background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
     background-repeat: no-repeat;
     background-position: right 8px center;
     background-size: 16px;
-    padding-right: 32px;
+    padding-right: 32px; /* Space for custom arrow */
     min-width: 200px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    flex: 1;
-  }
-  
-  #dropdown-container select:hover {
-    border-color: #00818F;
+    flex: 1; /* Allows dropdown to take remaining space */
+}
+
+/* Hover state for the dropdown */
+#dropdown-container select:hover {
+    border-color: #00818F; /* Theme color */
     box-shadow: 0 2px 5px rgba(0, 129, 143, 0.1);
-  }
-  
-  #dropdown-container select:focus {
+}
+
+/* Focus state for the dropdown */
+#dropdown-container select:focus {
     outline: none;
     border-color: #00818F;
     box-shadow: 0 0 0 2px rgba(0, 129, 143, 0.2);
-  }
-  
-  #dropdown-container select option {
+}
+
+/* Styling for dropdown options */
+#dropdown-container select option {
     padding: 8px;
     font-size: 12px;
     background-color: white;
     color: #333;
-  }
-  
-  #dropdown-container select option:hover {
+}
+
+/* Hover state for dropdown options */
+#dropdown-container select option:hover {
     background-color: #f5f5f5;
-  }
-  
-  #slider-container {
+}
+
+/* Container for parameter adjustment sliders */
+#slider-container {
     display: flex;
     justify-content: center;
     align-items: center;
     margin-bottom: 10px;
-  }
-  
-  #slider-container > div {
+}
+
+/* Individual slider container */
+#slider-container > div {
     margin: 0 10px;
     display: flex;
     align-items: center;
-  }
-  
-  #slider-container label {
+}
+
+/* Label styling for sliders */
+#slider-container label {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     font-size: 12px;
     color: #333;
     margin-right: 5px;
-  }
-  
-  #slider-container input[type="range"] {
+}
+
+/* Custom styling for range input sliders */
+#slider-container input[type="range"] {
     width: 60px;
     height: 4px;
     -webkit-appearance: none;
@@ -100,31 +118,34 @@
     border-radius: 5px;
     outline: none;
     margin: 0 5px;
-  }
-  
-  #slider-container input[type="range"]::-webkit-slider-thumb {
+}
+
+/* Webkit-specific slider thumb styling */
+#slider-container input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: #00818F;
+    background: #00818F; /* Theme color */
     cursor: pointer;
     border: none;
-  }
-  
-  #slider-container input[type="range"]::-moz-range-thumb {
+}
+
+/* Firefox-specific slider thumb styling */
+#slider-container input[type="range"]::-moz-range-thumb {
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: #00818F;
+    background: #00818F; /* Theme color */
     cursor: pointer;
     border: none;
-  }
-  
-  #slider-container span {
+}
+
+/* Value display for sliders */
+#slider-container span {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     font-size: 12px;
     color: #333;
-  }
+}
   
