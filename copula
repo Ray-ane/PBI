@@ -274,9 +274,11 @@ export class Visual implements IVisual {
         // Clear previous chart
         this.svg.selectAll("*").remove();
 
-        // Set up dimensions with padding for better visibility
-        const width = Math.min(this.currentViewport.width, this.currentViewport.height);
-        const height = width;
+        // Set up dimensions using the full viewport
+        const width = this.currentViewport.width;
+        const height = this.currentViewport.height;
+        
+        // Update SVG container size
         this.svg
             .attr("width", width)
             .attr("height", height)
@@ -337,6 +339,9 @@ export class Visual implements IVisual {
                 .attr("y2", yScale(y));
         }
 
+        // Calculate point size based on viewport
+        const pointSize = Math.max(2, Math.min(width, height) / 200);
+
         // Plot scatter points
         g.selectAll("circle")
             .data(this.copulaModel.getPoints())
@@ -344,9 +349,13 @@ export class Visual implements IVisual {
             .append("circle")
             .attr("cx", d => xScale(d.u1))
             .attr("cy", d => yScale(d.u2))
-            .attr("r", 2)
+            .attr("r", pointSize)
             .attr("fill", "#00A6FF")
             .attr("opacity", 0.6);
+
+        // Calculate font sizes based on viewport
+        const tickFontSize = Math.max(8, Math.min(width, height) / 50);
+        const labelFontSize = Math.max(10, Math.min(width, height) / 40);
 
         // Add axes
         const xAxis = d3.axisBottom(xScale)
@@ -362,28 +371,28 @@ export class Visual implements IVisual {
             .attr("class", "x-axis")
             .attr("transform", `translate(0, ${innerHeight})`)
             .call(xAxis)
-            .style("font-size", "10px");
+            .style("font-size", `${tickFontSize}px`);
 
         // Add y-axis
         g.append("g")
             .attr("class", "y-axis")
             .call(yAxis)
-            .style("font-size", "10px");
+            .style("font-size", `${tickFontSize}px`);
 
         // Add axis labels
         g.append("text")
             .attr("x", innerWidth / 2)
-            .attr("y", innerHeight + 30)
+            .attr("y", innerHeight + CHART_MARGINS.bottom * 0.7)
             .attr("text-anchor", "middle")
-            .style("font-size", "12px")
+            .style("font-size", `${labelFontSize}px`)
             .text("Bond1 Error (U1)");
 
         g.append("text")
             .attr("transform", "rotate(-90)")
             .attr("x", -innerHeight / 2)
-            .attr("y", -30)
+            .attr("y", -CHART_MARGINS.left * 0.7)
             .attr("text-anchor", "middle")
-            .style("font-size", "12px")
+            .style("font-size", `${labelFontSize}px`)
             .text("Bond2 Error (U2)");
 
         // Add correlation info
@@ -391,7 +400,7 @@ export class Visual implements IVisual {
             .attr("x", innerWidth - 10)
             .attr("y", -10)
             .attr("text-anchor", "end")
-            .style("font-size", "12px")
+            .style("font-size", `${labelFontSize}px`)
             .text(`ρ = ${this.copulaModel.getCorrelation().toFixed(3)}`);
     }
 }
