@@ -78,8 +78,26 @@ export class Visual implements IVisual {
         this.target.innerHTML = "";
 
         this.createControlContainer();
+        this.createTooltip();
         this.initializeControls();
         this.createSVGContainer();
+    }
+
+    /**
+     * Creates the tooltip element
+     */
+    private createTooltip(): void {
+        const tooltip = document.createElement("div");
+        tooltip.id = "tooltip";
+        tooltip.style.position = "absolute";
+        tooltip.style.padding = "8px";
+        tooltip.style.background = "rgba(255, 255, 255, 0.9)";
+        tooltip.style.border = "1px solid #ddd";
+        tooltip.style.borderRadius = "4px";
+        tooltip.style.pointerEvents = "none";
+        tooltip.style.fontSize = "12px";
+        tooltip.style.zIndex = "1000";
+        this.target.appendChild(tooltip);
     }
 
     /**
@@ -275,11 +293,19 @@ export class Visual implements IVisual {
         const height = this.currentViewport.height;
         this.svg.attr("width", width).attr("height", height);
 
+        // Calculate inner dimensions
+        const innerWidth = width - CHART_MARGINS.left - CHART_MARGINS.right;
+        const innerHeight = height - CHART_MARGINS.top - CHART_MARGINS.bottom;
+
+        // Create main chart group
+        const g = this.svg.append("g")
+            .attr("transform", `translate(${CHART_MARGINS.left}, ${CHART_MARGINS.top})`);
+
         // Check for data
         if (!hasData) {
-            this.svg.append("text")
-                .attr("x", width / 2)
-                .attr("y", height / 2)
+            g.append("text")
+                .attr("x", innerWidth / 2)
+                .attr("y", innerHeight / 2)
                 .attr("text-anchor", "middle")
                 .attr("fill", "red")
                 .style("font-size", "14px")
@@ -307,6 +333,13 @@ class CopulaModel {
             u1: [],
             u2: []
         };
+    }
+
+    /**
+     * Gets the current correlation parameter
+     */
+    public getCorrelation(): number {
+        return this.params.rho;
     }
 
     /**
@@ -534,7 +567,7 @@ class CopulaModel {
      */
     public renderCopulaPlot(container: HTMLElement, width: number, height: number): void {
         // Clear previous content
-        container.innerHTML = "";
+        d3.select(container).selectAll("*").remove();
 
         // Create SVG
         const svg = d3.select(container)
@@ -542,14 +575,22 @@ class CopulaModel {
             .attr("width", width)
             .attr("height", height);
 
+        // Calculate inner dimensions
+        const innerWidth = width - this.margin.left - this.margin.right;
+        const innerHeight = height - this.margin.top - this.margin.bottom;
+
+        // Create main chart group
+        const g = svg.append("g")
+            .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
+
         // Create scales
         const xScale = d3.scaleLinear()
             .domain([0, 1])
-            .range([this.margin.left, width - this.margin.right]);
+            .range([0, innerWidth]);
 
         const yScale = d3.scaleLinear()
             .domain([0, 1])
-            .range([height - this.margin.bottom, this.margin.top]);
+            .range([innerHeight, 0]);
 
         // Create color scale
         const colorScale = d3.scaleSequential()
@@ -571,7 +612,7 @@ class CopulaModel {
         ).flat();
 
         // Create heatmap
-        svg.selectAll("rect")
+        g.selectAll("rect")
             .data(densityData)
             .enter()
             .append("rect")
@@ -591,40 +632,105 @@ class CopulaModel {
             .ticks(5)
             .tickFormat(d3.format(".2f"));
 
-        svg.append("g")
-            .attr("transform", `translate(0,${height - this.margin.bottom})`)
-            .call(xAxis)
-            .append("text")
-            .attr("x", width / 2)
-            .attr("y", 40)
-            .attr("fill", "black")
+        // Add x-axis
+        const xAxisGroup = g.append("g")
+            .attr("transform", `translate(0, ${innerHeight})`)
+            .call(xAxis);
+
+        // Style x-axis
+        xAxisGroup.selectAll("text")
+            .attr("transform", "rotate(-20)")
+            .style("text-anchor", "end")
+            .style("font-size", "10px")
+            .style("fill", "#000")
+            .attr("dy", "1em")
+            .attr("dx", "-0.5em");
+
+        xAxisGroup.selectAll("line")
+            .style("stroke", "#000")
+            .style("stroke-width", "1px");
+
+        xAxisGroup.selectAll("path")
+            .style("stroke", "#000")
+            .style("stroke-width", "1px");
+
+        // Add y-axis
+        const yAxisGroup = g.append("g")
+            .call(yAxis);
+
+        yAxisGroup.selectAll("text")
+            .style("font-size", "12px")
+            .style("fill", "#000");
+
+        yAxisGroup.selectAll("line")
+            .style("stroke", "#000")
+            .style("stroke-width", "1px");
+
+        yAxisGroup.selectAll("path")
+            .style("stroke", "#000")
+            .style("stroke-width", "1px");
+
+        // Add axis labels
+        g.append("text")
+            .attr("x", innerWidth / 2)
+            .attr("y", innerHeight + 40)
+            .attr("text-anchor", "middle")
+            .style("font-size", "12px")
+            .style("fill", "#000")
             .text("Bond1 Error (U1)");
 
-        svg.append("g")
-            .attr("transform", `translate(${this.margin.left},0)`)
-            .call(yAxis)
-            .append("text")
+        g.append("text")
             .attr("transform", "rotate(-90)")
-            .attr("x", -height / 2)
+            .attr("x", -innerHeight / 2)
             .attr("y", -40)
-            .attr("fill", "black")
+            .attr("text-anchor", "middle")
+            .style("font-size", "12px")
+            .style("fill", "#000")
             .text("Bond2 Error (U2)");
 
         // Add title
-        svg.append("text")
-            .attr("x", width / 2)
-            .attr("y", this.margin.top / 2)
+        g.append("text")
+            .attr("x", innerWidth / 2)
+            .attr("y", -10)
             .attr("text-anchor", "middle")
-            .attr("font-size", "16px")
-            .attr("font-weight", "bold")
+            .style("font-size", "16px")
+            .style("font-weight", "bold")
             .text("Copula Density Plot");
 
         // Add correlation info
-        svg.append("text")
-            .attr("x", width / 2)
-            .attr("y", height - 10)
-            .attr("text-anchor", "middle")
-            .attr("font-size", "12px")
+        g.append("text")
+            .attr("x", innerWidth - 10)
+            .attr("y", -10)
+            .attr("text-anchor", "end")
+            .style("font-size", "12px")
+            .style("fill", "#333")
             .text(`Correlation (ρ) = ${this.params.rho.toFixed(3)}`);
+
+        // Add tooltip
+        const tooltip = d3.select("#tooltip");
+        const bisectX = d3.bisector<{x: number, y: number, density: number}, number>(d => d.x).left;
+
+        // Add tooltip interaction overlay
+        g.append("rect")
+            .attr("width", innerWidth)
+            .attr("height", innerHeight)
+            .style("fill", "none")
+            .style("pointer-events", "all")
+            .on("mousemove", (event) => {
+                const mouseX = xScale.invert(d3.pointer(event)[0]);
+                const mouseY = yScale.invert(d3.pointer(event)[1]);
+                const index = bisectX(densityData, mouseX);
+                const d = densityData[index];
+                if (d) {
+                    tooltip
+                        .style("opacity", 1)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 10) + "px")
+                        .html(`U1: ${d.x.toFixed(3)}<br/>U2: ${d.y.toFixed(3)}<br/>Density: ${d.density.toFixed(3)}`);
+                }
+            })
+            .on("mouseout", () => {
+                tooltip.style("opacity", 0);
+            });
     }
 } 
