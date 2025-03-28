@@ -574,21 +574,27 @@ class CopulaModel {
     public computeCopulaDensity(u1: number, u2: number): number {
         const { rho, df } = this.params;
         
-        // Convert to standard normal quantiles
-        const x1 = this.quantileNormal(u1);
-        const x2 = this.quantileNormal(u2);
+        try {
+            // Convert to standard normal quantiles
+            const x1 = this.quantileNormal(u1);
+            const x2 = this.quantileNormal(u2);
 
-        // Compute t-copula density
-        const rho2 = rho * rho;
-        const t1 = this.quantileT(u1, df);
-        const t2 = this.quantileT(u2, df);
-        
-        const num = (1 + (t1 * t1 + t2 * t2 - 2 * rho * t1 * t2) / (df * (1 - rho2)));
-        const den = Math.sqrt(1 - rho2) * 
-                   this.tDensity(t1, df) * 
-                   this.tDensity(t2, df);
+            // Compute t-copula density
+            const rho2 = rho * rho;
+            const t1 = this.quantileT(u1, df);
+            const t2 = this.quantileT(u2, df);
+            
+            const num = (1 + (t1 * t1 + t2 * t2 - 2 * rho * t1 * t2) / (df * (1 - rho2)));
+            const den = Math.sqrt(1 - rho2) * 
+                       this.tDensity(t1, df) * 
+                       this.tDensity(t2, df);
 
-        return num / den;
+            return num / den;
+        } catch (error) {
+            console.error(`Error in computeCopulaDensity: u1=${u1}, u2=${u2}, df=${df}`);
+            console.error(error);
+            throw error;
+        }
     }
 
     /**
@@ -598,7 +604,8 @@ class CopulaModel {
     private quantileNormal(p: number): number {
         // Input validation
         if (p <= 0 || p >= 1) {
-            throw new Error("Probability must be between 0 and 1");
+            console.error(`Invalid probability in quantileNormal: ${p}`);
+            throw new Error(`Probability must be between 0 and 1, got ${p}`);
         }
 
         // Coefficients for the approximation
@@ -661,7 +668,8 @@ class CopulaModel {
     private quantileT(p: number, df: number): number {
         // Input validation
         if (p <= 0 || p >= 1) {
-            throw new Error("Probability must be between 0 and 1");
+            console.error(`Invalid probability in quantileT: ${p}, df: ${df}`);
+            throw new Error(`Probability must be between 0 and 1, got ${p}`);
         }
 
         // For large degrees of freedom, use normal approximation
