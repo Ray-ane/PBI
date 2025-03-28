@@ -102,6 +102,10 @@ export class Visual implements IVisual {
             <div id="dropdown-container">
                 <label for="pairDropdown">Select Pair (Bond1 vs Bond2):</label>
                 <select id="pairDropdown" style="font-size: 10px;"></select>
+                <div style="margin-top: 5px;">
+                    <input type="checkbox" id="showOnlyADFPairs" style="margin-right: 5px;">
+                    <label for="showOnlyADFPairs">Show only pairs that pass ADF test</label>
+                </div>
             </div>
             <div id="slider-container">
             <div>
@@ -143,6 +147,7 @@ export class Visual implements IVisual {
         this.dropdownPairs = document.getElementById("pairDropdown") as HTMLSelectElement;
         this.lambdaSlider = document.getElementById("lambdaSlider") as HTMLInputElement;
         this.sigmaSlider = document.getElementById("sigmaSlider") as HTMLInputElement;
+        const showOnlyADFPairsCheckbox = document.getElementById("showOnlyADFPairs") as HTMLInputElement;
 
         this.dropdownPairs.addEventListener("change", () => this.updateChartsInner());
         this.lambdaSlider.addEventListener("input", () => {
@@ -153,6 +158,7 @@ export class Visual implements IVisual {
             (document.getElementById("sigmaValue") as HTMLElement).innerText = this.sigmaSlider.value;
             this.updateChartsInner();
         });
+        showOnlyADFPairsCheckbox.addEventListener("change", () => this.updateDropdown());
     }
 
     /**
@@ -245,21 +251,76 @@ export class Visual implements IVisual {
             d.inputdate.toDateString() === new Date(maxDate).toDateString()
         );
 
+        // Get unique pairs
         const uniquePairs = Array.from(new Set(
             latestRows.map(row => `${row.bond1} vs ${row.bond2}`)
         ));
 
-        this.dropdownPairs.options.length = 0;
-        uniquePairs.forEach(pair => {
-            const opt = document.createElement("option");
-            opt.value = pair;
-            opt.text = pair;
-            opt.style.fontSize = "10px";
-            this.dropdownPairs.appendChild(opt);
-        });
+        // Check if we should filter for ADF-passing pairs
+        const showOnlyADFPairs = (document.getElementById("showOnlyADFPairs") as HTMLInputElement).checked;
+        
+        if (showOnlyADFPairs) {
+            // Filter pairs that pass ADF test
+            const adfPassingPairs = uniquePairs.filter(pair => {
+                const [bond1, bond2] = pair.split(" vs ");
+                const errorRows = this.allData.filter(d => 
+                    d.context1.trim().toUpperCase() === "ERROR"
+                );
 
-        if (uniquePairs.length > 0) {
-            this.dropdownPairs.value = uniquePairs[0];
+                const mapBond1 = new Map<string, number>();
+                const mapBond2 = new Map<string, number>();
+                
+                errorRows.forEach(d => {
+                    const key = d.inputdate.toDateString();
+                    if (d.bond1.trim() === bond1.trim()) {
+                        mapBond1.set(key, d.error);
+                    } else if (d.bond1.trim() === bond2.trim()) {
+                        mapBond2.set(key, d.error);
+                    }
+                });
+
+                // Compute difference series
+                const diffSeries = Array.from(mapBond1.entries())
+                    .filter(([key]) => mapBond2.has(key))
+                    .map(([key, val1]) => ({
+                        inputdate: new Date(key),
+                        diff: mapBond2.get(key)! - val1
+                    }))
+                    .sort((a, b) => a.inputdate.getTime() - b.inputdate.getTime());
+
+                if (diffSeries.length < 2) return false;
+
+                // Apply ADF test
+                const diffs = diffSeries.map(d => d.diff);
+                return this.performADFTest(diffs);
+            });
+
+            this.dropdownPairs.options.length = 0;
+            adfPassingPairs.forEach(pair => {
+                const opt = document.createElement("option");
+                opt.value = pair;
+                opt.text = pair;
+                opt.style.fontSize = "10px";
+                this.dropdownPairs.appendChild(opt);
+            });
+
+            if (adfPassingPairs.length > 0) {
+                this.dropdownPairs.value = adfPassingPairs[0];
+            }
+        } else {
+            // Show all pairs
+            this.dropdownPairs.options.length = 0;
+            uniquePairs.forEach(pair => {
+                const opt = document.createElement("option");
+                opt.value = pair;
+                opt.text = pair;
+                opt.style.fontSize = "10px";
+                this.dropdownPairs.appendChild(opt);
+            });
+
+            if (uniquePairs.length > 0) {
+                this.dropdownPairs.value = uniquePairs[0];
+            }
         }
     }
 
