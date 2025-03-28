@@ -71,18 +71,18 @@ export class Visual implements IVisual {
         controlContainer.id = "control-container";
         controlContainer.innerHTML = `
             <div id="dropdown-container">
-                <label for="pairDropdown">Select Pair (Bond1 - Bond2):</label>
+                <label for="pairDropdown">Select Pair (Bond1 vs Bond2):</label>
                 <select id="pairDropdown" style="font-size: 10px;"></select>
             </div>
             <div id="slider-container">
             <div>
                 <label for="lambdaSlider">Lambda Factor:</label>
-                <input id="lambdaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+                <input id="lambdaSlider" type="range" min="0.1" max="2.0" step="0.01" value="1.0">
                 <span id="lambdaValue">1.0</span>
             </div>
             <div>
                 <label for="sigmaSlider">Sigma Factor:</label>
-                <input id="sigmaSlider" type="range" min="0.5" max="2.0" step="0.01" value="1.0">
+                <input id="sigmaSlider" type="range" min="0.1" max="1.5" step="0.01" value="1.0">
                 <span id="sigmaValue">1.0</span>
                 </div>
             </div>
@@ -218,7 +218,7 @@ export class Visual implements IVisual {
         // Build unique pairs from latestRows using bond1 and bond2.
         const pairSet = new Set<string>();
         latestRows.forEach(row => {
-            const pairKey = `${row.bond1} - ${row.bond2}`;
+            const pairKey = `${row.bond1} vs ${row.bond2}`;
             pairSet.add(pairKey);
         });
         const uniquePairs = Array.from(pairSet);
@@ -249,7 +249,7 @@ export class Visual implements IVisual {
         if (this.dropdownPairs.options.length === 0) return;
         const selectedPair = this.dropdownPairs.value;
         if (!selectedPair) return;
-        const [selectedBond1, selectedBond2] = selectedPair.split(" - ");
+        const [selectedBond1, selectedBond2] = selectedPair.split(" vs ");
 
         // Filter rows with context1 === "ERROR" (normalized).
         const errorRows = this.allData.filter(d => d.context1.trim().toUpperCase() === "ERROR");
