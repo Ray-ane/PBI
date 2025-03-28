@@ -14,6 +14,7 @@
     position: relative;
     width: 100%;
     max-width: 400px;
+    flex-wrap: nowrap;
   }
   
   #dropdown-container label {
@@ -22,6 +23,7 @@
     margin: 0 10px;
     color: #333;
     font-weight: 500;
+    white-space: nowrap;
   }
   
   #dropdown-container select {
@@ -44,6 +46,7 @@
     padding-right: 32px;
     min-width: 200px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    flex: 1;
   }
   
   #dropdown-container select:hover {
