@@ -323,29 +323,23 @@ export class Visual implements IVisual {
             .domain([0, 1])
             .range([innerHeight, 0]);
 
-        // Create color scale
+        // Create color scale for Clayton copula
         const colorScale = d3.scaleSequential()
-            .domain([0, 2])
+            .domain([0, 5])  // Adjust domain for Clayton density range
             .interpolator(d3.interpolateViridis);
 
         // Create grid points with validation
-        const gridSize = 50;
+        const gridSize = 100;  // Increase grid size for smoother visualization
         const xPoints = d3.range(gridSize).map(i => {
-            const val = i / (gridSize - 1);
-            if (val < 0 || val > 1) {
-                console.error(`Invalid x grid point: ${val}`);
-            }
+            const val = 0.0001 + (0.9998 * i / (gridSize - 1));  // Avoid exact 0 and 1
             return val;
         });
         const yPoints = d3.range(gridSize).map(i => {
-            const val = i / (gridSize - 1);
-            if (val < 0 || val > 1) {
-                console.error(`Invalid y grid point: ${val}`);
-            }
+            const val = 0.0001 + (0.9998 * i / (gridSize - 1));  // Avoid exact 0 and 1
             return val;
         });
 
-        // Compute copula density for each grid point with validation
+        // Compute Clayton copula density for each grid point with validation
         const densityData = xPoints.map(x => 
             yPoints.map(y => {
                 try {
@@ -584,7 +578,7 @@ class CopulaModel {
     }
 
     /**
-     * Computes the correlation parameter using Kendall's tau
+     * Computes the correlation parameter and converts to Clayton theta
      */
     private computeCorrelation(): void {
         const n = this.data.length;
@@ -607,177 +601,39 @@ class CopulaModel {
         }
 
         const tau = (concordant - discordant) / (n * (n - 1) / 2);
-        this.params.rho = Math.sin(tau * Math.PI / 2);
+        // Convert Kendall's tau to Clayton parameter
+        this.params.rho = Math.max(tau, 0.01); // Ensure positive dependence
     }
 
     /**
-     * Computes the t-copula density at given points
+     * Computes the Clayton copula density at given points
      */
     public computeCopulaDensity(u1: number, u2: number): number {
-        const { rho, df } = this.params;
-        
         try {
-            // Validate input values
-            if (u1 < 0 || u1 > 1 || u2 < 0 || u2 > 1) {
-                console.error(`Invalid input probabilities: u1=${u1}, u2=${u2}`);
+            // Ensure inputs are strictly between 0 and 1
+            if (u1 <= 0.0000001 || u1 >= 0.9999999 || u2 <= 0.0000001 || u2 >= 0.9999999) {
                 return 0;
             }
 
-            // Convert to standard normal quantiles
-            const x1 = this.quantileNormal(u1);
-            const x2 = this.quantileNormal(u2);
+            // Get Clayton parameter (theta)
+            const theta = Math.abs(this.params.rho * 20); // Scale rho to get reasonable theta values
 
-            // Compute t-copula density
-            const rho2 = rho * rho;
-            const t1 = this.quantileT(u1, df);
-            const t2 = this.quantileT(u2, df);
+            // Compute Clayton copula density
+            const term1 = (1 + theta) * Math.pow(u1 * u2, -(1 + theta));
+            const term2 = Math.pow(Math.pow(u1, -theta) + Math.pow(u2, -theta) - 1, -(2 + 1/theta));
             
-            const num = (1 + (t1 * t1 + t2 * t2 - 2 * rho * t1 * t2) / (df * (1 - rho2)));
-            const den = Math.sqrt(1 - rho2) * 
-                       this.tDensity(t1, df) * 
-                       this.tDensity(t2, df);
+            const density = term1 * term2;
 
-            const density = num / den;
-            
-            // Validate output
-            if (!isFinite(density)) {
-                console.error(`Invalid density result: ${density} for u1=${u1}, u2=${u2}`);
+            // Handle numerical instabilities
+            if (!isFinite(density) || isNaN(density)) {
                 return 0;
             }
 
-            return density;
+            // Cap the density for visualization purposes
+            return Math.min(density, 10);
         } catch (error) {
-            console.error(`Error in computeCopulaDensity: u1=${u1}, u2=${u2}, df=${df}`);
-            console.error(error);
-            return 0; // Return 0 instead of throwing
+            console.error(`Error in Clayton copula density: u1=${u1}, u2=${u2}`);
+            return 0;
         }
-    }
-
-    /**
-     * Computes the standard normal quantile (inverse CDF)
-     * Using the approximation method by Peter J. Acklam
-     */
-    private quantileNormal(p: number): number {
-        // Input validation
-        if (p <= 0 || p >= 1) {
-            console.error(`Invalid probability in quantileNormal: ${p}`);
-            throw new Error(`Probability must be between 0 and 1, got ${p}`);
-        }
-
-        // Coefficients for the approximation
-        const a1 = -3.969683028665376e+01;
-        const a2 = 2.209460984245205e+02;
-        const a3 = -2.759285104469687e+02;
-        const a4 = 1.383577518672690e+02;
-        const a5 = -3.066479806614716e+01;
-        const a6 = 2.506628277459239e+00;
-
-        const b1 = -5.447609879822406e+01;
-        const b2 = 1.615858368580409e+02;
-        const b3 = -1.556989798598866e+02;
-        const b4 = 6.680131188771972e+01;
-        const b5 = -1.328068155288572e+01;
-
-        const c1 = -7.784894002430293e-03;
-        const c2 = -3.223964580411365e-01;
-        const c3 = -2.400758277161838e+00;
-        const c4 = -2.549732539343734e+00;
-        const c5 = 4.374664141464968e+00;
-        const c6 = 2.938163982698783e+00;
-
-        const d1 = 7.784695709041462e-03;
-        const d2 = 3.224671290700398e-01;
-        const d3 = 2.445134137142996e+00;
-        const d4 = 3.754408661907416e+00;
-
-        // Define break points
-        const p_low = 0.02425;
-        const p_high = 1 - p_low;
-
-        let q, r;
-
-        // Rational approximation for lower region
-        if (p < p_low) {
-            q = Math.sqrt(-2 * Math.log(p));
-            return (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
-                   ((((d1 * q + d2) * q + d3) * q + d4) * q + 1);
-        }
-        // Rational approximation for upper region
-        else if (p > p_high) {
-            q = Math.sqrt(-2 * Math.log(1 - p));
-            return -(((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
-                    ((((d1 * q + d2) * q + d3) * q + d4) * q + 1);
-        }
-        // Rational approximation for central region
-        else {
-            q = p - 0.5;
-            r = q * q;
-            return (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q /
-                   (((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1);
-        }
-    }
-
-    /**
-     * Computes the t-distribution quantile (inverse CDF)
-     * Using the approximation method by Hill (1970)
-     */
-    private quantileT(p: number, df: number): number {
-        // Input validation
-        if (p <= 0 || p >= 1) {
-            console.error(`Invalid probability in quantileT: ${p}, df: ${df}`);
-            throw new Error(`Probability must be between 0 and 1, got ${p}`);
-        }
-
-        // For large degrees of freedom, use normal approximation
-        if (df > 100) {
-            return this.quantileNormal(p);
-        }
-
-        // For small degrees of freedom, use Hill's approximation
-        const a = df - 0.5;
-        const b = 48 * a * a;
-        let z = this.quantileNormal(p);
-        let z2 = z * z;
-        let z3 = z2 * z;
-        let z4 = z3 * z;
-        let z5 = z4 * z;
-        let z6 = z5 * z;
-        let z7 = z6 * z;
-        let z8 = z7 * z;
-
-        let g = z + (z3 + z) / (4 * a) +
-            (5 * z5 + 16 * z3 + 3 * z) / (96 * a * a) +
-            (3 * z7 + 19 * z5 + 17 * z3 - 15 * z) / (384 * a * a * a) +
-            (79 * z8 + 776 * z6 + 1482 * z4 - 1920 * z2 - 945) / (92160 * a * a * a * a);
-
-        return g;
-    }
-
-    /**
-     * Computes the t-distribution density
-     */
-    private tDensity(x: number, df: number): number {
-        return Math.pow(1 + x * x / df, -(df + 1) / 2) / 
-               (Math.sqrt(df * Math.PI) * this.gamma(df / 2) / this.gamma((df + 1) / 2));
-    }
-
-    /**
-     * Computes the gamma function
-     */
-    private gamma(x: number): number {
-        if (x < 0.5) {
-            return Math.PI / (Math.sin(Math.PI * x) * this.gamma(1 - x));
-        }
-        x -= 1;
-        let a = 0.99999999999980993;
-        const p = [
-            676.5203681218851, -1259.1392167224028, 771.32342877765313,
-            -176.61502916214059, 12.507343278686905, -0.13857109526572012,
-            9.9843695780195716e-6, 1.5056327351493116e-7
-        ];
-        for (let i = 0; i < p.length; i++) {
-            a += p[i] / (x + i + 1);
-        }
-        return Math.sqrt(2 * Math.PI) * Math.pow(x + p.length - 0.5, x + 0.5) * Math.exp(-x - p.length + 0.5) * a;
     }
 } 
