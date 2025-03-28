@@ -273,12 +273,13 @@ export class Visual implements IVisual {
             return;
         }
 
-        // Update copula model
+        // Update copula model with new data and degrees of freedom
         this.copulaModel.setData(
             bondErrorPoints.map(d => d.bond1Error),
             bondErrorPoints.map(d => d.bond2Error),
             bondErrorPoints.map(d => d.date)
         );
+        this.copulaModel.setDegreesOfFreedom(parseFloat(this.dfSlider.value));
 
         // Render chart
         this.renderChart(true);
@@ -313,8 +314,155 @@ export class Visual implements IVisual {
             return;
         }
 
-        // Render copula plot
-        this.copulaModel.renderCopulaPlot(this.target, width, height);
+        // Create scales
+        const xScale = d3.scaleLinear()
+            .domain([0, 1])
+            .range([0, innerWidth]);
+
+        const yScale = d3.scaleLinear()
+            .domain([0, 1])
+            .range([innerHeight, 0]);
+
+        // Create color scale
+        const colorScale = d3.scaleSequential()
+            .domain([0, 2])
+            .interpolator(d3.interpolateViridis);
+
+        // Create grid points
+        const gridSize = 50;
+        const xPoints = d3.range(gridSize).map(i => i / (gridSize - 1));
+        const yPoints = d3.range(gridSize).map(i => i / (gridSize - 1));
+
+        // Compute copula density for each grid point
+        const densityData = xPoints.map(x => 
+            yPoints.map(y => ({
+                x,
+                y,
+                density: this.copulaModel.computeCopulaDensity(x, y)
+            }))
+        ).flat();
+
+        // Create heatmap
+        g.selectAll("rect")
+            .data(densityData)
+            .enter()
+            .append("rect")
+            .attr("x", d => xScale(d.x))
+            .attr("y", d => yScale(d.y))
+            .attr("width", xScale(1 / (gridSize - 1)))
+            .attr("height", yScale(1 / (gridSize - 1)))
+            .attr("fill", d => colorScale(d.density))
+            .attr("opacity", 0.8);
+
+        // Add axes
+        const xAxis = d3.axisBottom(xScale)
+            .ticks(5)
+            .tickFormat(d3.format(".2f"));
+
+        const yAxis = d3.axisLeft(yScale)
+            .ticks(5)
+            .tickFormat(d3.format(".2f"));
+
+        // Add x-axis
+        const xAxisGroup = g.append("g")
+            .attr("transform", `translate(0, ${innerHeight})`)
+            .call(xAxis);
+
+        // Style x-axis
+        xAxisGroup.selectAll("text")
+            .attr("transform", "rotate(-20)")
+            .style("text-anchor", "end")
+            .style("font-size", "10px")
+            .style("fill", "#000")
+            .attr("dy", "1em")
+            .attr("dx", "-0.5em");
+
+        xAxisGroup.selectAll("line")
+            .style("stroke", "#000")
+            .style("stroke-width", "1px");
+
+        xAxisGroup.selectAll("path")
+            .style("stroke", "#000")
+            .style("stroke-width", "1px");
+
+        // Add y-axis
+        const yAxisGroup = g.append("g")
+            .call(yAxis);
+
+        yAxisGroup.selectAll("text")
+            .style("font-size", "12px")
+            .style("fill", "#000");
+
+        yAxisGroup.selectAll("line")
+            .style("stroke", "#000")
+            .style("stroke-width", "1px");
+
+        yAxisGroup.selectAll("path")
+            .style("stroke", "#000")
+            .style("stroke-width", "1px");
+
+        // Add axis labels
+        g.append("text")
+            .attr("x", innerWidth / 2)
+            .attr("y", innerHeight + 40)
+            .attr("text-anchor", "middle")
+            .style("font-size", "12px")
+            .style("fill", "#000")
+            .text("Bond1 Error (U1)");
+
+        g.append("text")
+            .attr("transform", "rotate(-90)")
+            .attr("x", -innerHeight / 2)
+            .attr("y", -40)
+            .attr("text-anchor", "middle")
+            .style("font-size", "12px")
+            .style("fill", "#000")
+            .text("Bond2 Error (U2)");
+
+        // Add title
+        g.append("text")
+            .attr("x", innerWidth / 2)
+            .attr("y", -10)
+            .attr("text-anchor", "middle")
+            .style("font-size", "16px")
+            .style("font-weight", "bold")
+            .text("Copula Density Plot");
+
+        // Add correlation info
+        g.append("text")
+            .attr("x", innerWidth - 10)
+            .attr("y", -10)
+            .attr("text-anchor", "end")
+            .style("font-size", "12px")
+            .style("fill", "#333")
+            .text(`Correlation (ρ) = ${this.copulaModel.getCorrelation().toFixed(3)}`);
+
+        // Add tooltip
+        const tooltip = d3.select("#tooltip");
+        const bisectX = d3.bisector<{x: number, y: number, density: number}, number>(d => d.x).left;
+
+        // Add tooltip interaction overlay
+        g.append("rect")
+            .attr("width", innerWidth)
+            .attr("height", innerHeight)
+            .style("fill", "none")
+            .style("pointer-events", "all")
+            .on("mousemove", (event) => {
+                const mouseX = xScale.invert(d3.pointer(event)[0]);
+                const mouseY = yScale.invert(d3.pointer(event)[1]);
+                const index = bisectX(densityData, mouseX);
+                const d = densityData[index];
+                if (d) {
+                    tooltip
+                        .style("opacity", 1)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 10) + "px")
+                        .html(`U1: ${d.x.toFixed(3)}<br/>U2: ${d.y.toFixed(3)}<br/>Density: ${d.density.toFixed(3)}`);
+                }
+            })
+            .on("mouseout", () => {
+                tooltip.style("opacity", 0);
+            });
     }
 }
 
@@ -340,6 +488,13 @@ class CopulaModel {
      */
     public getCorrelation(): number {
         return this.params.rho;
+    }
+
+    /**
+     * Sets the degrees of freedom parameter
+     */
+    public setDegreesOfFreedom(df: number): void {
+        this.params.df = df;
     }
 
     /**
@@ -560,177 +715,5 @@ class CopulaModel {
             a += p[i] / (x + i + 1);
         }
         return Math.sqrt(2 * Math.PI) * Math.pow(x + p.length - 0.5, x + 0.5) * Math.exp(-x - p.length + 0.5) * a;
-    }
-
-    /**
-     * Renders the copula density plot
-     */
-    public renderCopulaPlot(container: HTMLElement, width: number, height: number): void {
-        // Clear previous content
-        d3.select(container).selectAll("*").remove();
-
-        // Create SVG
-        const svg = d3.select(container)
-            .append("svg")
-            .attr("width", width)
-            .attr("height", height);
-
-        // Calculate inner dimensions
-        const innerWidth = width - this.margin.left - this.margin.right;
-        const innerHeight = height - this.margin.top - this.margin.bottom;
-
-        // Create main chart group
-        const g = svg.append("g")
-            .attr("transform", `translate(${this.margin.left}, ${this.margin.top})`);
-
-        // Create scales
-        const xScale = d3.scaleLinear()
-            .domain([0, 1])
-            .range([0, innerWidth]);
-
-        const yScale = d3.scaleLinear()
-            .domain([0, 1])
-            .range([innerHeight, 0]);
-
-        // Create color scale
-        const colorScale = d3.scaleSequential()
-            .domain([0, 2])
-            .interpolator(d3.interpolateViridis);
-
-        // Create grid points
-        const gridSize = 50;
-        const xPoints = d3.range(gridSize).map(i => i / (gridSize - 1));
-        const yPoints = d3.range(gridSize).map(i => i / (gridSize - 1));
-
-        // Compute copula density for each grid point
-        const densityData = xPoints.map(x => 
-            yPoints.map(y => ({
-                x,
-                y,
-                density: this.computeCopulaDensity(x, y)
-            }))
-        ).flat();
-
-        // Create heatmap
-        g.selectAll("rect")
-            .data(densityData)
-            .enter()
-            .append("rect")
-            .attr("x", d => xScale(d.x))
-            .attr("y", d => yScale(d.y))
-            .attr("width", xScale(1 / (gridSize - 1)))
-            .attr("height", yScale(1 / (gridSize - 1)))
-            .attr("fill", d => colorScale(d.density))
-            .attr("opacity", 0.8);
-
-        // Add axes
-        const xAxis = d3.axisBottom(xScale)
-            .ticks(5)
-            .tickFormat(d3.format(".2f"));
-
-        const yAxis = d3.axisLeft(yScale)
-            .ticks(5)
-            .tickFormat(d3.format(".2f"));
-
-        // Add x-axis
-        const xAxisGroup = g.append("g")
-            .attr("transform", `translate(0, ${innerHeight})`)
-            .call(xAxis);
-
-        // Style x-axis
-        xAxisGroup.selectAll("text")
-            .attr("transform", "rotate(-20)")
-            .style("text-anchor", "end")
-            .style("font-size", "10px")
-            .style("fill", "#000")
-            .attr("dy", "1em")
-            .attr("dx", "-0.5em");
-
-        xAxisGroup.selectAll("line")
-            .style("stroke", "#000")
-            .style("stroke-width", "1px");
-
-        xAxisGroup.selectAll("path")
-            .style("stroke", "#000")
-            .style("stroke-width", "1px");
-
-        // Add y-axis
-        const yAxisGroup = g.append("g")
-            .call(yAxis);
-
-        yAxisGroup.selectAll("text")
-            .style("font-size", "12px")
-            .style("fill", "#000");
-
-        yAxisGroup.selectAll("line")
-            .style("stroke", "#000")
-            .style("stroke-width", "1px");
-
-        yAxisGroup.selectAll("path")
-            .style("stroke", "#000")
-            .style("stroke-width", "1px");
-
-        // Add axis labels
-        g.append("text")
-            .attr("x", innerWidth / 2)
-            .attr("y", innerHeight + 40)
-            .attr("text-anchor", "middle")
-            .style("font-size", "12px")
-            .style("fill", "#000")
-            .text("Bond1 Error (U1)");
-
-        g.append("text")
-            .attr("transform", "rotate(-90)")
-            .attr("x", -innerHeight / 2)
-            .attr("y", -40)
-            .attr("text-anchor", "middle")
-            .style("font-size", "12px")
-            .style("fill", "#000")
-            .text("Bond2 Error (U2)");
-
-        // Add title
-        g.append("text")
-            .attr("x", innerWidth / 2)
-            .attr("y", -10)
-            .attr("text-anchor", "middle")
-            .style("font-size", "16px")
-            .style("font-weight", "bold")
-            .text("Copula Density Plot");
-
-        // Add correlation info
-        g.append("text")
-            .attr("x", innerWidth - 10)
-            .attr("y", -10)
-            .attr("text-anchor", "end")
-            .style("font-size", "12px")
-            .style("fill", "#333")
-            .text(`Correlation (ρ) = ${this.params.rho.toFixed(3)}`);
-
-        // Add tooltip
-        const tooltip = d3.select("#tooltip");
-        const bisectX = d3.bisector<{x: number, y: number, density: number}, number>(d => d.x).left;
-
-        // Add tooltip interaction overlay
-        g.append("rect")
-            .attr("width", innerWidth)
-            .attr("height", innerHeight)
-            .style("fill", "none")
-            .style("pointer-events", "all")
-            .on("mousemove", (event) => {
-                const mouseX = xScale.invert(d3.pointer(event)[0]);
-                const mouseY = yScale.invert(d3.pointer(event)[1]);
-                const index = bisectX(densityData, mouseX);
-                const d = densityData[index];
-                if (d) {
-                    tooltip
-                        .style("opacity", 1)
-                        .style("left", (event.pageX + 10) + "px")
-                        .style("top", (event.pageY - 10) + "px")
-                        .html(`U1: ${d.x.toFixed(3)}<br/>U2: ${d.y.toFixed(3)}<br/>Density: ${d.density.toFixed(3)}`);
-                }
-            })
-            .on("mouseout", () => {
-                tooltip.style("opacity", 0);
-            });
     }
 } 
