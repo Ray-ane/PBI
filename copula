@@ -344,42 +344,75 @@ export class Visual implements IVisual {
             .style("stroke-width", "1px")
             .style("fill", "none");
 
-        // Generate points for the bounds curves
-        const upperBoundPoints: [number, number][] = [];
-        const lowerBoundPoints: [number, number][] = [];
-        const numPoints = 100;
-        
         // Get Clayton parameter
         const theta = Math.abs(this.copulaModel.getCorrelation() * 20);
-        
+
+        // Function to compute Clayton copula
+        const claytonCopula = (u: number, v: number): number => {
+            return Math.pow(Math.pow(u, -theta) + Math.pow(v, -theta) - 1, -1/theta);
+        };
+
+        // Function to find v given u and C (contour level)
+        const findContourPoint = (u: number, C: number): number | null => {
+            try {
+                // Solve for v: C = (u^(-θ) + v^(-θ) - 1)^(-1/θ)
+                // => v = (((1/C)^θ + 1 - u^(-θ))^(-1))^(1/θ)
+                const term = Math.pow(1/C, theta) + 1 - Math.pow(u, -theta);
+                if (term <= 0) return null;
+                const v = Math.pow(Math.pow(term, -1), 1/theta);
+                return v >= 0 && v <= 1 ? v : null;
+            } catch (error) {
+                return null;
+            }
+        };
+
+        // Generate points for the contour curves
+        const lowerContourPoints: [number, number][] = [];
+        const upperContourPoints: [number, number][] = [];
+        const numPoints = 200;
+        const lowerLevel = 0.01;
+        const upperLevel = 0.99;
+
+        // Generate points with finer spacing near the edges
         for (let i = 0; i <= numPoints; i++) {
-            const x = i / numPoints;
-            
-            // Upper bound curve (perfect positive dependence)
-            upperBoundPoints.push([x, Math.min(1, Math.pow(Math.pow(x, -theta) + Math.pow(1, -theta) - 1, -1/theta))]);
-            
-            // Lower bound curve (perfect negative dependence)
-            lowerBoundPoints.push([x, Math.max(0, Math.pow(Math.pow(x, -theta) + Math.pow(0, -theta) - 1, -1/theta))]);
+            const t = i / numPoints;
+            // Use a power function to concentrate points near 0 and 1
+            const u = Math.pow(t, 2);
+
+            // Find corresponding v values for both contours
+            const vLower = findContourPoint(u, lowerLevel);
+            const vUpper = findContourPoint(u, upperLevel);
+
+            if (vLower !== null && !isNaN(vLower)) {
+                lowerContourPoints.push([u, vLower]);
+            }
+            if (vUpper !== null && !isNaN(vUpper)) {
+                upperContourPoints.push([u, vUpper]);
+            }
         }
 
-        // Create line generator
+        // Create line generator with curve interpolation
         const lineGenerator = d3.line()
             .x(d => xScale(d[0]))
-            .y(d => yScale(d[1]));
+            .y(d => yScale(d[1]))
+            .curve(d3.curveBasis); // Use basis interpolation for smoother curves
 
-        // Add upper bound curve
-        boundsGroup.append("path")
-            .datum(upperBoundPoints)
-            .attr("d", lineGenerator)
-            .style("stroke", "black")
-            .style("stroke-width", "1px");
+        // Add contour curves
+        if (lowerContourPoints.length > 0) {
+            boundsGroup.append("path")
+                .datum(lowerContourPoints)
+                .attr("d", lineGenerator)
+                .style("stroke", "black")
+                .style("stroke-width", "1px");
+        }
 
-        // Add lower bound curve
-        boundsGroup.append("path")
-            .datum(lowerBoundPoints)
-            .attr("d", lineGenerator)
-            .style("stroke", "black")
-            .style("stroke-width", "1px");
+        if (upperContourPoints.length > 0) {
+            boundsGroup.append("path")
+                .datum(upperContourPoints)
+                .attr("d", lineGenerator)
+                .style("stroke", "black")
+                .style("stroke-width", "1px");
+        }
 
         // Plot scatter points
         const pointSize = 2;
