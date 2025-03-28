@@ -302,13 +302,13 @@ export class Visual implements IVisual {
             return;
         }
 
-        // Create scales with padding
+        // Create scales
         const xScale = d3.scaleLinear()
-            .domain([-0.05, 1.05])  // Add padding to domain
+            .domain([0, 1])
             .range([0, innerWidth]);
 
         const yScale = d3.scaleLinear()
-            .domain([-0.05, 1.05])  // Add padding to domain
+            .domain([0, 1])
             .range([innerHeight, 0]);
 
         // Add grid lines
@@ -337,20 +337,6 @@ export class Visual implements IVisual {
                 .attr("y2", yScale(y));
         }
 
-        // Add boundary lines
-        const boundaryLines = g.append("g")
-            .attr("class", "boundary-lines")
-            .style("stroke", "black")
-            .style("stroke-width", "1.5");
-
-        // Add boundary box
-        boundaryLines.append("rect")
-            .attr("x", xScale(0))
-            .attr("y", yScale(1))
-            .attr("width", xScale(1) - xScale(0))
-            .attr("height", yScale(0) - yScale(1))
-            .style("fill", "none");
-
         // Plot scatter points
         g.selectAll("circle")
             .data(this.copulaModel.getPoints())
@@ -358,31 +344,30 @@ export class Visual implements IVisual {
             .append("circle")
             .attr("cx", d => xScale(d.u1))
             .attr("cy", d => yScale(d.u2))
-            .attr("r", 2.5)
+            .attr("r", 2)
             .attr("fill", "#00A6FF")
-            .attr("opacity", 0.7);
+            .attr("opacity", 0.6);
 
-        // Add axes with more ticks
+        // Add axes
         const xAxis = d3.axisBottom(xScale)
-            .ticks(10)
+            .ticks(5)
             .tickFormat(d3.format(".1f"));
 
         const yAxis = d3.axisLeft(yScale)
-            .ticks(10)
+            .ticks(5)
             .tickFormat(d3.format(".1f"));
 
         // Add x-axis
         g.append("g")
-            .attr("transform", `translate(0, ${yScale(0)})`)
+            .attr("class", "x-axis")
+            .attr("transform", `translate(0, ${innerHeight})`)
             .call(xAxis)
-            .selectAll("text")
             .style("font-size", "10px");
 
         // Add y-axis
         g.append("g")
-            .attr("transform", `translate(${xScale(0)}, 0)`)
+            .attr("class", "y-axis")
             .call(yAxis)
-            .selectAll("text")
             .style("font-size", "10px");
 
         // Add axis labels
